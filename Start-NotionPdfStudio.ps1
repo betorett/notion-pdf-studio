@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Port = if ($env:PORT) { [int]$env:PORT } else { 4173 }
 $Url = "http://localhost:$Port"
+$ServerScript = Join-Path $AppRoot "server.js"
 $OutLogPath = Join-Path $AppRoot "notion-pdf-studio.out.log"
 $ErrLogPath = Join-Path $AppRoot "notion-pdf-studio.err.log"
 $BrowserProfile = Join-Path $env:LOCALAPPDATA "NotionPdfStudio\BrowserProfile"
@@ -32,6 +33,24 @@ function Test-ManagedServer {
   $escapedRoot = [regex]::Escape($AppRoot)
   $serverProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($Process.Id)" -ErrorAction SilentlyContinue
   return $serverProcess.CommandLine -match "server\.js" -and $serverProcess.CommandLine -match $escapedRoot
+}
+
+function Test-AppServerOnPort {
+  param([int]$LocalPort)
+  try {
+    $health = Invoke-RestMethod -Uri "http://localhost:$LocalPort/api/health" -TimeoutSec 2
+    return $health.name -eq "notion-pdf-studio"
+  } catch {
+    return $false
+  }
+}
+
+function Wait-PortClosed {
+  param([int]$LocalPort)
+  $deadline = (Get-Date).AddSeconds(5)
+  while ((Get-Date) -lt $deadline -and (Get-PortProcess -LocalPort $LocalPort)) {
+    Start-Sleep -Milliseconds 150
+  }
 }
 
 function Find-Browser {
@@ -75,18 +94,24 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 
 $serverProcess = Get-PortProcess -LocalPort $Port
-$startedServer = $false
 
-if (-not $serverProcess) {
-  $serverProcess = Start-Process -FilePath "node" `
-    -ArgumentList "server.js" `
-    -WorkingDirectory $AppRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $OutLogPath `
-    -RedirectStandardError $ErrLogPath `
-    -PassThru
-  $startedServer = $true
+if ($serverProcess) {
+  if ((Test-ManagedServer -Process $serverProcess) -or (Test-AppServerOnPort -LocalPort $Port)) {
+    Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
+    Wait-PortClosed -LocalPort $Port
+  } else {
+    Show-AppError "El puerto $Port ya lo está usando otra aplicación. Cierra esa aplicación o cambia el puerto de Notion PDF Studio."
+    exit 1
+  }
 }
+
+$serverProcess = Start-Process -FilePath "node" `
+  -ArgumentList $ServerScript `
+  -WorkingDirectory $AppRoot `
+  -WindowStyle Hidden `
+  -RedirectStandardOutput $OutLogPath `
+  -RedirectStandardError $ErrLogPath `
+  -PassThru
 
 $deadline = (Get-Date).AddSeconds(10)
 while ((Get-Date) -lt $deadline -and -not (Get-PortProcess -LocalPort $Port)) {
@@ -118,9 +143,10 @@ while (($browserProcess -and -not $browserProcess.HasExited) -or (Test-BrowserOp
   Start-Sleep -Seconds 1
 }
 
+# Give the browser a short grace period to flush the final token save beacon.
+Start-Sleep -Milliseconds 900
+
 $activeServer = Get-PortProcess -LocalPort $Port
-if ($startedServer -and $activeServer) {
-  Stop-Process -Id $activeServer.Id -Force -ErrorAction SilentlyContinue
-} elseif (Test-ManagedServer -Process $activeServer) {
+if ((Test-ManagedServer -Process $activeServer) -or (Test-AppServerOnPort -LocalPort $Port)) {
   Stop-Process -Id $activeServer.Id -Force -ErrorAction SilentlyContinue
 }

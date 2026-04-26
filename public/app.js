@@ -147,6 +147,10 @@ function bindEvents() {
   });
   els.tokenInput.addEventListener("change", () => saveTokenNow());
   els.tokenInput.addEventListener("blur", () => saveTokenNow());
+  window.addEventListener("beforeunload", saveTokenBeforeClose);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") saveTokenBeforeClose();
+  });
   els.collapseSidebarButton.addEventListener("click", () => {
     document.body.classList.toggle("sidebar-collapsed");
     renderSidebarToggleState();
@@ -261,6 +265,17 @@ async function saveTokenNow() {
     await api("/api/state/token", { token: state.token });
   } catch {
     // The token is still kept in localStorage; sync/preview will surface API issues.
+  }
+}
+
+function saveTokenBeforeClose() {
+  clearTimeout(tokenSaveTimer);
+  try {
+    const body = JSON.stringify({ token: state.token });
+    const blob = new Blob([body], { type: "application/json" });
+    navigator.sendBeacon("/api/state/token", blob);
+  } catch {
+    rememberTokenLocally(state.token);
   }
 }
 
