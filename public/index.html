@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Exportador local de páginas de Notion a PDF con filtros, preview de saltos de página y control de márgenes." />
+    <meta name="theme-color" content="#f4f3f0" />
+    <title>Notion PDF Studio</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='white'/%3E%3Crect x='9' y='9' width='46' height='46' fill='none' stroke='black' stroke-width='4'/%3E%3Ctext x='22' y='43' font-size='30' font-family='Georgia' font-weight='700'%3EN%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <aside class="sidebar" aria-label="Espacio de trabajo">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">N</div>
+          <div>
+            <strong>Notion PDF Studio</strong>
+            <span id="connectionLabel">Sin token</span>
+          </div>
+          <button id="collapseSidebarButton" class="icon-button modern-toggle sidebar-toggle" type="button" title="Ocultar panel lateral" aria-label="Ocultar panel lateral">
+            <span class="chevron-icon left" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <section class="side-section">
+          <div class="section-title">Conexión</div>
+          <label class="field">
+            <span>Token de Notion</span>
+            <input id="tokenInput" type="password" autocomplete="off" placeholder="secret_..." />
+          </label>
+          <label class="field">
+            <span>Base de datos o data source</span>
+            <input id="sourceInput" type="text" placeholder="ID o URL de Notion" />
+          </label>
+          <div class="button-row">
+            <button id="syncButton" class="button primary" type="button">Sincronizar</button>
+          </div>
+        </section>
+
+        <section class="side-section">
+          <div class="section-title">DB guardadas</div>
+          <div id="savedDatabases" class="saved-list"></div>
+          <button id="dbSettingsButton" class="button full" type="button">Ajustes de propiedades</button>
+          <button id="saveDbButton" class="button full" type="button">Guardar DB</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow" id="sourceMode">Vista local</div>
+            <h1>Páginas</h1>
+          </div>
+          <div class="command-bar">
+            <label class="search">
+              <span aria-hidden="true">⌕</span>
+              <input id="searchInput" type="search" placeholder="Buscar páginas y propiedades" />
+            </label>
+            <button id="selectAllButton" class="button" type="button">Seleccionar</button>
+            <button id="loadPreviewButton" class="button strong" type="button">Vista previa</button>
+            <button id="exportButton" class="button primary" type="button">Exportar PDF</button>
+          </div>
+        </header>
+
+        <section class="filters-panel" aria-label="Filtros">
+          <div class="panel-heading">
+            <div>
+              <strong>Filtros</strong>
+              <span id="filterSummary">Sin filtros activos</span>
+            </div>
+            <div class="button-row compact">
+              <button id="toggleFiltersButton" class="icon-button modern-toggle" type="button" title="Ocultar filtros" aria-label="Ocultar filtros">
+                <span class="chevron-icon up" aria-hidden="true"></span>
+              </button>
+              <button id="applyQueryButton" class="button small" type="button">Aplicar</button>
+              <button id="addFilterButton" class="icon-button" type="button" title="Añadir filtro">+</button>
+              <button id="clearFiltersButton" class="icon-button" type="button" title="Limpiar filtros">×</button>
+            </div>
+          </div>
+          <div id="filterBody" class="filter-body">
+            <div id="filterRows" class="filter-rows"></div>
+            <div class="sort-row" aria-label="Orden">
+              <span>Orden</span>
+              <select id="sortPropertyInput"></select>
+              <select id="sortDirectionInput">
+                <option value="ascending">Ascendente</option>
+                <option value="descending">Descendente</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section id="dbSettingsPanel" class="db-settings-panel hidden" aria-label="Ajustes de base de datos">
+          <div class="panel-heading">
+            <div>
+              <strong>Ajustes de DB</strong>
+              <span id="dbSettingsSummary">Propiedades visibles</span>
+            </div>
+            <button id="closeDbSettingsButton" class="icon-button" type="button" title="Ocultar ajustes de DB">×</button>
+          </div>
+          <div id="propertySettingsList" class="property-settings-list"></div>
+        </section>
+
+        <section class="table-wrap" aria-label="Tabla de páginas">
+          <div class="table-meta">
+            <span id="selectionCount">0 seleccionadas</span>
+            <span id="pageCount">0 páginas</span>
+          </div>
+          <div class="notion-table">
+            <table>
+              <thead>
+                <tr id="tableHead"></tr>
+              </thead>
+              <tbody id="pageRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <aside class="preview-panel" aria-label="Vista previa">
+        <div class="preview-header">
+          <div>
+            <div class="eyebrow">Vista previa</div>
+            <h2>Saltos de página</h2>
+          </div>
+          <div class="preview-actions">
+            <button id="togglePreviewSettingsButton" class="icon-button modern-toggle" type="button" title="Ocultar ajustes de vista previa" aria-label="Ocultar ajustes de vista previa">
+              <span class="chevron-icon up" aria-hidden="true"></span>
+            </button>
+            <span id="sheetCount" class="pill">0 hojas</span>
+          </div>
+        </div>
+
+        <section id="previewSettingsPanel" class="settings">
+          <div class="setting-grid">
+            <label>
+              <span>Papel</span>
+              <select id="paperInput">
+                <option value="A4">A4</option>
+                <option value="Letter">Letter</option>
+              </select>
+            </label>
+            <label>
+              <span>Orientación</span>
+              <select id="orientationInput">
+                <option value="portrait">Vertical</option>
+                <option value="landscape">Horizontal</option>
+              </select>
+            </label>
+            <label>
+              <span>Escala</span>
+              <input id="scaleInput" type="number" min="70" max="120" step="1" />
+            </label>
+            <label>
+              <span>Superior</span>
+              <input id="marginTopInput" type="number" min="4" max="60" step="1" />
+            </label>
+            <label>
+              <span>Derecha</span>
+              <input id="marginRightInput" type="number" min="4" max="60" step="1" />
+            </label>
+            <label>
+              <span>Inferior</span>
+              <input id="marginBottomInput" type="number" min="4" max="60" step="1" />
+            </label>
+            <label>
+              <span>Izquierda</span>
+              <input id="marginLeftInput" type="number" min="4" max="60" step="1" />
+            </label>
+            <label>
+              <span>Salida</span>
+              <select id="exportModeInput">
+                <option value="single">PDF único</option>
+                <option value="separate">PDFs separados</option>
+              </select>
+            </label>
+          </div>
+          <div class="toggles">
+            <label><input id="headerToggle" type="checkbox" /> Encabezado</label>
+            <label><input id="footerToggle" type="checkbox" /> Pie de página</label>
+            <label><input id="propertiesToggle" type="checkbox" /> Propiedades</label>
+            <label><input id="newSheetToggle" type="checkbox" /> Nueva hoja por página</label>
+          </div>
+        </section>
+
+        <div id="status" class="status" role="status">Listo.</div>
+        <div id="previewCanvas" class="preview-canvas"></div>
+      </aside>
+    </div>
+
+    <div id="printDocument" aria-hidden="true"></div>
+    <style id="printStyle"></style>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

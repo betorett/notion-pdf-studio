@@ -1,0 +1,26 @@
+{
+  "name": "notion-pdf-studio",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Local Notion to PDF exporter with multi-page selection, property filters, page-break preview, saved databases, and print-ready output.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "start:prod": "node server.js",
+    "check": "node --check server.js && node --check public/app.js",
+    "prepublishOnly": "npm run check"
+  },
+  "keywords": [
+    "notion",
+    "pdf",
+    "export",
+    "local",
+    "print"
+  ],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  }
+}
