@@ -56,6 +56,7 @@ let katexPromise = null;
 let mermaidPromise = null;
 let katexCssPromise = null;
 let katexRefreshQueued = false;
+let tokenSaveTimer = 0;
 const previewCache = {
   key: "",
   previewHtml: "",
@@ -69,8 +70,8 @@ async function init() {
   bindElements();
   bindEvents();
   applySettingsToControls();
-  els.tokenInput.value = state.token;
   await loadState();
+  els.tokenInput.value = state.token;
   renderSidebarToggleState();
   renderFiltersCollapsedState();
   renderFilters();
@@ -140,15 +141,12 @@ function bindElements() {
 function bindEvents() {
   els.tokenInput.addEventListener("input", () => {
     state.token = els.tokenInput.value.trim();
-    if (state.token) {
-      localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
-      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-    } else {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-    }
+    rememberTokenLocally(state.token);
+    queueSaveToken();
     updateConnection();
   });
+  els.tokenInput.addEventListener("change", () => saveTokenNow());
+  els.tokenInput.addEventListener("blur", () => saveTokenNow());
   els.collapseSidebarButton.addEventListener("click", () => {
     document.body.classList.toggle("sidebar-collapsed");
     renderSidebarToggleState();
@@ -223,6 +221,10 @@ function bindEvents() {
 async function loadState() {
   try {
     const payload = await api("/api/state");
+    if (payload.state.notionToken || !state.token) {
+      state.token = payload.state.notionToken || state.token;
+      rememberTokenLocally(state.token);
+    }
     state.savedDatabases = payload.state.savedDatabases || [];
     state.savedDatabases = state.savedDatabases.filter((saved) => saved.sourceId !== "demo-notion-workspace" && saved.mode !== "demo");
     state.exportHistory = payload.state.exportHistory || [];
@@ -233,6 +235,32 @@ async function loadState() {
     renderHistory();
   } catch (error) {
     setStatus(error.message, true);
+  }
+}
+
+function rememberTokenLocally(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+}
+
+function queueSaveToken() {
+  clearTimeout(tokenSaveTimer);
+  tokenSaveTimer = setTimeout(() => {
+    saveTokenNow();
+  }, 350);
+}
+
+async function saveTokenNow() {
+  clearTimeout(tokenSaveTimer);
+  try {
+    await api("/api/state/token", { token: state.token });
+  } catch {
+    // The token is still kept in localStorage; sync/preview will surface API issues.
   }
 }
 
@@ -265,6 +293,7 @@ async function syncNotion() {
 
   setLoading(true, "Sincronizando páginas de Notion...");
   try {
+    await saveTokenNow();
     const payload = await api("/api/notion/query", {
       token: state.token,
       sourceId,

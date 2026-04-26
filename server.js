@@ -344,6 +344,7 @@ async function ensureState() {
     return JSON.parse(raw);
   } catch {
     const initial = {
+      notionToken: "",
       savedDatabases: [],
       exportHistory: []
     };
@@ -426,6 +427,13 @@ function responseHeaders(extra = {}) {
 
 function getToken(body = {}) {
   return String(body.token || process.env.NOTION_TOKEN || process.env.NOTION_API_KEY || "").trim();
+}
+
+function redactState(state) {
+  return {
+    ...state,
+    notionToken: String(state.notionToken || "")
+  };
 }
 
 function normalizeNotionId(input) {
@@ -920,7 +928,7 @@ async function handleApi(req, res, pathname) {
   if (method === "GET" && pathname === "/api/state") {
     const state = await ensureState();
     state.savedDatabases = state.savedDatabases.filter((saved) => saved.sourceId !== DEMO_SOURCE_ID && saved.mode !== "demo");
-    sendJson(res, 200, { state, defaults: defaultPrintSettings() });
+    sendJson(res, 200, { state: redactState(state), defaults: defaultPrintSettings() });
     return;
   }
 
@@ -935,6 +943,14 @@ async function handleApi(req, res, pathname) {
 
   const body = await readJson(req);
   const token = getToken(body);
+
+  if (method === "POST" && pathname === "/api/state/token") {
+    const state = await ensureState();
+    state.notionToken = String(body.token || "").trim();
+    await writeState(state);
+    sendJson(res, 200, { ok: true, hasToken: Boolean(state.notionToken) });
+    return;
+  }
 
   if (method === "POST" && pathname === "/api/notion/schema") {
     const source = await resolveSource(token, body.sourceId);
