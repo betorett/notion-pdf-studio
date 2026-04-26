@@ -106,7 +106,7 @@ if ($serverProcess) {
 }
 
 $serverProcess = Start-Process -FilePath "node" `
-  -ArgumentList $ServerScript `
+  -ArgumentList "`"$ServerScript`"" `
   -WorkingDirectory $AppRoot `
   -WindowStyle Hidden `
   -RedirectStandardOutput $OutLogPath `
