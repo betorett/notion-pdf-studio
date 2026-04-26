@@ -35,7 +35,7 @@ function Test-ManagedServer {
 }
 
 function Find-Browser {
-  $commands = @("msedge", "chrome")
+  $commands = @("chrome", "msedge")
   foreach ($command in $commands) {
     $found = Get-Command $command -ErrorAction SilentlyContinue
     if ($found) {
@@ -44,10 +44,10 @@ function Find-Browser {
   }
 
   $paths = @(
-    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
-    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
   )
 
   foreach ($path in $paths) {
@@ -100,21 +100,21 @@ if (-not (Get-PortProcess -LocalPort $Port)) {
 
 $browser = Find-Browser
 if (-not $browser) {
-  Show-AppError "No encuentro Microsoft Edge ni Google Chrome. Instala uno de los dos para abrir Notion PDF Studio como aplicación."
+  Show-AppError "No encuentro Google Chrome ni Microsoft Edge. Instala Chrome para abrir Notion PDF Studio como aplicación."
   exit 1
 }
 
 New-Item -ItemType Directory -Path $BrowserProfile -Force | Out-Null
 
-Start-Process -FilePath $browser -ArgumentList @(
+$browserProcess = Start-Process -FilePath $browser -ArgumentList @(
   "--app=$Url",
   "--user-data-dir=$BrowserProfile",
   "--no-first-run",
   "--disable-extensions"
-) | Out-Null
+) -PassThru
 
 Start-Sleep -Seconds 2
-while (Test-BrowserOpen) {
+while (($browserProcess -and -not $browserProcess.HasExited) -or (Test-BrowserOpen)) {
   Start-Sleep -Seconds 1
 }
 
