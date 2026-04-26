@@ -10,9 +10,10 @@ const MAX_PREVIEW_SCALE = 0.56;
 const KATEX_CSS_URL = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css";
 const KATEX_JS_URL = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js";
 const MERMAID_JS_URL = "https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js";
+const TOKEN_STORAGE_KEY = "notionPdfToken";
 
 const state = {
-  token: sessionStorage.getItem("notionPdfToken") || "",
+  token: localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY) || "",
   source: null,
   schema: {},
   pages: [],
@@ -139,7 +140,13 @@ function bindElements() {
 function bindEvents() {
   els.tokenInput.addEventListener("input", () => {
     state.token = els.tokenInput.value.trim();
-    sessionStorage.setItem("notionPdfToken", state.token);
+    if (state.token) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    } else {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
     updateConnection();
   });
   els.collapseSidebarButton.addEventListener("click", () => {
