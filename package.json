@@ -27,6 +27,7 @@
     "@hungknguyen/mathml2omml": "^0.4.6",
     "docx": "^9.6.1",
     "jszip": "^3.10.1",
-    "katex": "^0.16.45"
+    "katex": "^0.16.45",
+    "xml-js": "^1.6.11"
   }
 }

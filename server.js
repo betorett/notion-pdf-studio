@@ -14,7 +14,6 @@ const {
   Header,
   HeadingLevel,
   ImageRun,
-  ImportedXmlComponent,
   Packer,
   PageBreak,
   PageNumber,
@@ -31,6 +30,8 @@ const {
 const JSZip = require("jszip");
 const katex = require("katex");
 const { mml2omml } = require("@hungknguyen/mathml2omml");
+const { xml2js } = require("xml-js");
+const { convertToXmlComponent } = require("docx");
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -1215,10 +1216,18 @@ function latexToOmmlComponent(expression) {
     const mathml = mathmlHtml.match(/<math[\s\S]*<\/math>/)?.[0]
       ?.replace(/<annotation[\s\S]*?<\/annotation>/g, "");
     if (!mathml) return null;
-    return ImportedXmlComponent.fromXmlString(mml2omml(mathml));
+    const omml = mml2omml(mathml)
+      .replace(/\s*m:val="undefined"/g, "");
+    return xmlToDocxComponent(omml);
   } catch {
     return null;
   }
+}
+
+function xmlToDocxComponent(xml) {
+  const parsed = xml2js(xml, { compact: false });
+  const root = parsed.elements?.find((element) => element.type === "element");
+  return root ? convertToXmlComponent(root) : null;
 }
 
 function tableToDocx(block) {
