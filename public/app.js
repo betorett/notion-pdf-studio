@@ -96,6 +96,8 @@ function bindElements() {
     "selectAllButton",
     "dbSettingsButton",
     "loadPreviewButton",
+    "exportWordButton",
+    "exportGoogleDocsButton",
     "exportButton",
     "filterSummary",
     "toggleFiltersButton",
@@ -167,6 +169,8 @@ function bindEvents() {
     els.dbSettingsPanel.classList.add("hidden");
   });
   els.loadPreviewButton.addEventListener("click", loadPreview);
+  els.exportWordButton.addEventListener("click", () => exportWord({ googleDocs: false }));
+  els.exportGoogleDocsButton.addEventListener("click", () => exportWord({ googleDocs: true }));
   els.exportButton.addEventListener("click", exportPdf);
   els.applyQueryButton.addEventListener("click", syncNotion);
   els.addFilterButton.addEventListener("click", () => {
@@ -404,6 +408,39 @@ async function exportPdf() {
   }
   setStatus("Abriendo impresión. Elige 'Guardar como PDF' en el navegador.");
   setTimeout(() => window.print(), 120);
+}
+
+async function exportWord({ googleDocs = false } = {}) {
+  if (!state.bundles.length) {
+    await loadPreview();
+  }
+  if (!state.bundles.length) return;
+
+  setLoading(true, googleDocs ? "Preparando documento Word para Google Docs..." : "Generando documento Word...");
+  try {
+    await ensurePreviewLibraries();
+    renderPreview(true);
+    await renderEnhancements();
+    const mermaidAssets = await collectMermaidAssets();
+    const response = await downloadFromApi("/api/export/docx", {
+      bundles: state.bundles,
+      settings: state.settings,
+      hiddenProperties: state.dbSettings.hiddenProperties || [],
+      mermaidAssets,
+      sourceName: state.source?.name || state.bundles[0]?.title || "Notion export"
+    });
+    downloadBlob(response.blob, response.filename);
+    if (googleDocs) {
+      setStatus("DOCX generado. Súbelo a Google Drive y ábrelo con Google Docs.");
+      window.open("https://drive.google.com/drive/my-drive", "_blank", "noopener,noreferrer");
+    } else {
+      setStatus(`Documento Word generado: ${response.filename}`);
+    }
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    setLoading(false);
+  }
 }
 
 function printSeparateBundles(index) {
@@ -1487,6 +1524,63 @@ async function renderMermaidDiagrams(root, scope) {
   }
 }
 
+async function collectMermaidAssets() {
+  const assets = {};
+  const nodes = Array.from(els.previewCanvas.querySelectorAll(".mermaid-diagram[data-rendered='true']"));
+  for (const node of nodes) {
+    const source = node.getAttribute("data-mermaid-source") || "";
+    const svg = node.querySelector("svg");
+    if (!source || !svg || assets[source]) continue;
+    try {
+      assets[source] = await svgToPngAsset(svg);
+    } catch {
+      // The server will fall back to the Mermaid source code.
+    }
+  }
+  return assets;
+}
+
+async function svgToPngAsset(svg) {
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const box = svg.viewBox?.baseVal;
+  const width = Math.ceil(Number(svg.getAttribute("width")) || box?.width || svg.getBoundingClientRect().width || 900);
+  const height = Math.ceil(Number(svg.getAttribute("height")) || box?.height || svg.getBoundingClientRect().height || 520);
+  clone.setAttribute("width", width);
+  clone.setAttribute("height", height);
+
+  const xml = new XMLSerializer().serializeToString(clone);
+  const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(2, window.devicePixelRatio || 1.5);
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return {
+      data: canvas.toDataURL("image/png"),
+      width,
+      height
+    };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
 async function ensurePreviewLibraries() {
   const tasks = [];
   if (hasMathContent()) tasks.push(ensureKatex());
@@ -1643,7 +1737,7 @@ function formatDate(value) {
 
 function setLoading(loading, message) {
   state.loading = loading;
-  for (const button of [els.syncButton, els.loadPreviewButton, els.exportButton, els.saveDbButton]) {
+  for (const button of [els.syncButton, els.loadPreviewButton, els.exportButton, els.exportWordButton, els.exportGoogleDocsButton, els.saveDbButton]) {
     button.disabled = loading;
   }
   if (message) setStatus(message);
@@ -1665,6 +1759,42 @@ async function api(path, body) {
     throw new Error(payload.error || `La petición ha fallado con HTTP ${response.status}`);
   }
   return payload;
+}
+
+async function downloadFromApi(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `La descarga ha fallado con HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  return {
+    blob,
+    filename: responseFileName(response.headers.get("Content-Disposition")) || "notion-export.docx"
+  };
+}
+
+function responseFileName(disposition) {
+  const value = String(disposition || "");
+  const utf = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf) return decodeURIComponent(utf[1]);
+  const basic = value.match(/filename="?([^";]+)"?/i);
+  return basic?.[1] || "";
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "notion-export.docx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function escapeHtml(value) {

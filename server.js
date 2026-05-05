@@ -5,6 +5,32 @@ const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { URL } = require("node:url");
+const {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  ExternalHyperlink,
+  Footer,
+  Header,
+  HeadingLevel,
+  ImageRun,
+  ImportedXmlComponent,
+  Packer,
+  PageBreak,
+  PageNumber,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableLayoutType,
+  TableRow,
+  TextRun,
+  VerticalAlign,
+  WidthType
+} = require("docx");
+const JSZip = require("jszip");
+const katex = require("katex");
+const { mml2omml } = require("@hungknguyen/mathml2omml");
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -23,7 +49,9 @@ const MIME_TYPES = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml; charset=utf-8",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".zip": "application/zip"
 };
 
 const DEMO_SOURCE_ID = "demo-notion-workspace";
@@ -383,6 +411,15 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+function sendBinary(res, status, buffer, contentType, filename) {
+  res.writeHead(status, responseHeaders({
+    "Content-Type": contentType,
+    "Content-Length": buffer.length,
+    "Content-Disposition": `attachment; filename="${downloadFileName(filename)}"`
+  }));
+  res.end(buffer);
+}
+
 function sendError(res, error) {
   const status = Number(error.status || 500);
   sendJson(res, status, {
@@ -396,7 +433,7 @@ async function readJson(req) {
   let length = 0;
   for await (const chunk of req) {
     length += chunk.length;
-    if (length > 12 * 1024 * 1024) {
+    if (length > 50 * 1024 * 1024) {
       throw httpError(413, "Request body is too large.");
     }
     chunks.push(chunk);
@@ -896,6 +933,398 @@ function richTextToPlain(richText) {
   return Array.isArray(richText) ? richText.map((part) => part.plain_text || "").join("") : "";
 }
 
+function downloadFileName(filename) {
+  return String(filename || "notion-export")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 140) || "notion-export";
+}
+
+function slugFileName(filename) {
+  return downloadFileName(filename)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._ -]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 90) || "notion-page";
+}
+
+function mmToTwip(value) {
+  return Math.round(Number(value || 0) * 56.6929133858);
+}
+
+function paperSettings(settings = {}) {
+  const paper = settings.paper === "Letter"
+    ? { width: 215.9, height: 279.4 }
+    : { width: 210, height: 297 };
+  if (settings.orientation === "landscape") {
+    return { width: paper.height, height: paper.width, orientation: "landscape" };
+  }
+  return { ...paper, orientation: "portrait" };
+}
+
+function normalizeWordSettings(settings = {}) {
+  return {
+    paper: settings.paper === "Letter" ? "Letter" : "A4",
+    orientation: settings.orientation === "landscape" ? "landscape" : "portrait",
+    marginTop: Number(settings.marginTop || 18),
+    marginRight: Number(settings.marginRight || 16),
+    marginBottom: Number(settings.marginBottom || 18),
+    marginLeft: Number(settings.marginLeft || 16),
+    showHeader: settings.showHeader !== false,
+    showFooter: settings.showFooter !== false,
+    showProperties: settings.showProperties !== false,
+    startEachPageOnNewSheet: settings.startEachPageOnNewSheet !== false,
+    exportMode: settings.exportMode === "separate" ? "separate" : "single"
+  };
+}
+
+async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAssets, title }) {
+  const wordSettings = normalizeWordSettings(settings);
+  const paper = paperSettings(wordSettings);
+  const children = [];
+  const hidden = new Set(Array.isArray(hiddenProperties) ? hiddenProperties : []);
+
+  for (let index = 0; index < bundles.length; index += 1) {
+    const bundle = bundles[index];
+    if (index > 0 && wordSettings.startEachPageOnNewSheet) {
+      children.push(new Paragraph({ children: [new PageBreak()] }));
+    }
+    children.push(...bundleToDocxChildren(bundle, { settings: wordSettings, hidden, mermaidAssets }));
+  }
+
+  const doc = new Document({
+    creator: "Notion PDF Studio",
+    title: title || "Exportación Notion",
+    description: "Documento exportado desde Notion PDF Studio",
+    styles: {
+      default: {
+        document: {
+          run: { font: "Arial", size: 22, color: "25231F" },
+          paragraph: { spacing: { after: 120 } }
+        }
+      },
+      paragraphStyles: [
+        { id: "NotionTitle", name: "Notion Title", basedOn: "Normal", next: "Normal", quickFormat: true, run: { size: 44, bold: true, color: "25231F" }, paragraph: { spacing: { before: 120, after: 220 } } },
+        { id: "NotionCode", name: "Notion Code", basedOn: "Normal", run: { font: "Consolas", size: 19, color: "25231F" }, paragraph: { shading: { type: ShadingType.CLEAR, fill: "F4F3F0" }, spacing: { before: 80, after: 140 } } }
+      ]
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: {
+            width: mmToTwip(paper.width),
+            height: mmToTwip(paper.height),
+            orientation: paper.orientation
+          },
+          margin: {
+            top: mmToTwip(wordSettings.marginTop),
+            right: mmToTwip(wordSettings.marginRight),
+            bottom: mmToTwip(wordSettings.marginBottom),
+            left: mmToTwip(wordSettings.marginLeft)
+          }
+        }
+      },
+      headers: wordSettings.showHeader ? {
+        default: new Header({
+          children: [new Paragraph({
+            children: [new TextRun({ text: title || "Notion PDF Studio", color: "7B756C", size: 18 })],
+            alignment: AlignmentType.RIGHT
+          })]
+        })
+      } : undefined,
+      footers: wordSettings.showFooter ? {
+        default: new Footer({
+          children: [new Paragraph({
+            children: [
+              new TextRun({ text: "Notion PDF Studio · ", color: "7B756C", size: 18 }),
+              new TextRun({ children: [PageNumber.CURRENT], color: "7B756C", size: 18 })
+            ],
+            alignment: AlignmentType.RIGHT
+          })]
+        })
+      } : undefined,
+      children
+    }]
+  });
+  return Packer.toBuffer(doc);
+}
+
+function bundleToDocxChildren(bundle, context) {
+  const children = [
+    new Paragraph({
+      style: "NotionTitle",
+      children: [new TextRun({ text: bundle.title || "Sin título", bold: true })]
+    })
+  ];
+  if (context.settings.showProperties) {
+    children.push(...propertiesToDocx(bundle.properties || {}, context.hidden));
+  }
+  for (const block of flattenNotionBlocks(bundle.blocks || [])) {
+    children.push(...blockToDocx(block, context));
+  }
+  return children;
+}
+
+function propertiesToDocx(properties, hidden) {
+  const rows = Object.entries(properties)
+    .filter(([name, value]) => name !== "Name" && !hidden.has(name) && value !== "" && value != null)
+    .slice(0, 14)
+    .map(([name, value]) => new TableRow({
+      children: [
+        new TableCell({
+          width: { size: 28, type: WidthType.PERCENTAGE },
+          shading: { type: ShadingType.CLEAR, fill: "F8F7F4" },
+          children: [new Paragraph({ children: [new TextRun({ text: name, bold: true, color: "6B665F" })] })]
+        }),
+        new TableCell({
+          width: { size: 72, type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ children: [new TextRun({ text: propertyValueText(value) || "Vacío" })] })]
+        })
+      ]
+    }));
+  if (!rows.length) return [];
+  return [
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      layout: TableLayoutType.AUTOFIT,
+      borders: softTableBorders(),
+      rows
+    }),
+    new Paragraph({ text: "" })
+  ];
+}
+
+function flattenNotionBlocks(blocks, depth = 0) {
+  const out = [];
+  let numberedIndex = 0;
+  for (const block of blocks) {
+    if (block.type === "numbered_list_item") numberedIndex += 1;
+    else numberedIndex = 0;
+    out.push({ ...block, depth, listIndex: numberedIndex || undefined });
+    if (block.children?.length && block.type !== "table") {
+      out.push(...flattenNotionBlocks(block.children, depth + 1));
+    }
+  }
+  return out;
+}
+
+function blockToDocx(block, context) {
+  const type = block.type || "unsupported";
+  const indent = { left: Math.min(Number(block.depth || 0) * 360, 1440) };
+  if (["heading_1", "heading_2", "heading_3"].includes(type)) {
+    const heading = type === "heading_1" ? HeadingLevel.HEADING_1 : type === "heading_2" ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
+    return [new Paragraph({ heading, indent, children: richTextToDocx(block[type]?.rich_text || []) })];
+  }
+  if (type === "heading_4") {
+    return [new Paragraph({ indent, children: [new TextRun({ text: richTextToPlain(block.heading_4?.rich_text || []), bold: true, size: 24 })] })];
+  }
+  if (type === "paragraph") {
+    return [new Paragraph({ indent, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
+  }
+  if (type === "bulleted_list_item") {
+    return [new Paragraph({ indent: { ...indent, hanging: 220 }, children: [new TextRun({ text: "•  " }), ...richTextToDocx(block.bulleted_list_item?.rich_text || [])] })];
+  }
+  if (type === "numbered_list_item") {
+    return [new Paragraph({ indent: { ...indent, hanging: 260 }, children: [new TextRun({ text: `${block.listIndex || 1}.  ` }), ...richTextToDocx(block.numbered_list_item?.rich_text || [])] })];
+  }
+  if (type === "to_do") {
+    return [new Paragraph({ indent, children: [new TextRun({ text: block.to_do?.checked ? "☑  " : "☐  " }), ...richTextToDocx(block.to_do?.rich_text || [])] })];
+  }
+  if (type === "quote") {
+    return [new Paragraph({
+      indent: { left: (indent.left || 0) + 360 },
+      border: { left: { style: BorderStyle.SINGLE, color: "CFC8BC", size: 12, space: 16 } },
+      children: richTextToDocx(block.quote?.rich_text || [])
+    })];
+  }
+  if (type === "callout") {
+    return [new Paragraph({
+      indent,
+      shading: { type: ShadingType.CLEAR, fill: "F4F3F0" },
+      spacing: { before: 100, after: 140 },
+      children: [new TextRun({ text: `${block.callout?.icon?.emoji || "ℹ"}  `, bold: true }), ...richTextToDocx(block.callout?.rich_text || [])]
+    })];
+  }
+  if (type === "divider") {
+    return [new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, color: "DED8CE", size: 6, space: 8 } }, children: [new TextRun("")] })];
+  }
+  if (type === "code") return codeBlockToDocx(block, context, indent);
+  if (type === "equation") return [equationParagraph(block.equation?.expression || "", true, indent)];
+  if (type === "table") return [tableToDocx(block)];
+  if (["image", "video", "audio", "pdf", "file", "bookmark", "embed", "link_preview"].includes(type)) {
+    return mediaToDocx(block, indent);
+  }
+  if (type === "child_page" || type === "child_database") {
+    return [new Paragraph({ indent, children: [new TextRun({ text: `↳ ${block[type]?.title || type.replaceAll("_", " ")}`, color: "6B665F" })] })];
+  }
+  return [new Paragraph({ indent, children: [new TextRun({ text: `Bloque de Notion no soportado: ${type}`, italics: true, color: "8A8176" })] })];
+}
+
+function codeBlockToDocx(block, context, indent) {
+  const text = richTextToPlain(block.code?.rich_text || []);
+  if (String(block.code?.language || "").toLowerCase() === "mermaid") {
+    const asset = context.mermaidAssets?.[text];
+    if (asset?.data) {
+      const data = dataUrlToBuffer(asset.data);
+      if (data) {
+        return [new Paragraph({
+          indent,
+          alignment: AlignmentType.CENTER,
+          children: [new ImageRun({
+            data,
+            transformation: imageDimensions(asset.width, asset.height, 520, 320)
+          })]
+        })];
+      }
+    }
+  }
+  return [new Paragraph({
+    style: "NotionCode",
+    indent,
+    children: [new TextRun({ text, font: "Consolas", size: 19 })]
+  })];
+}
+
+function equationParagraph(expression, display, indent) {
+  const math = latexToOmmlComponent(expression);
+  if (math) {
+    return new Paragraph({ indent, alignment: display ? AlignmentType.CENTER : undefined, children: [math] });
+  }
+  return new Paragraph({
+    indent,
+    children: [
+      new TextRun({ text: "Ecuación no convertible: ", italics: true, color: "8A8176" }),
+      new TextRun({ text: String(expression || ""), font: "Consolas" })
+    ]
+  });
+}
+
+function latexToOmmlComponent(expression) {
+  const source = String(expression || "").trim();
+  if (!source) return null;
+  try {
+    const mathmlHtml = katex.renderToString(source, {
+      output: "mathml",
+      displayMode: true,
+      throwOnError: false,
+      strict: "ignore"
+    });
+    const mathml = mathmlHtml.match(/<math[\s\S]*<\/math>/)?.[0]
+      ?.replace(/<annotation[\s\S]*?<\/annotation>/g, "");
+    if (!mathml) return null;
+    return ImportedXmlComponent.fromXmlString(mml2omml(mathml));
+  } catch {
+    return null;
+  }
+}
+
+function tableToDocx(block) {
+  const rows = block.children || [];
+  if (!rows.length) {
+    return new Paragraph({ children: [new TextRun({ text: "Tabla vacía", italics: true, color: "8A8176" })] });
+  }
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.AUTOFIT,
+    borders: softTableBorders(),
+    rows: rows.map((row, rowIndex) => new TableRow({
+      tableHeader: rowIndex === 0 && Boolean(block.table?.has_column_header),
+      children: (row.table_row?.cells || []).map((cell) => new TableCell({
+        verticalAlign: VerticalAlign.TOP,
+        shading: rowIndex === 0 && block.table?.has_column_header ? { type: ShadingType.CLEAR, fill: "F4F3F0" } : undefined,
+        children: [new Paragraph({ children: richTextToDocx(cell) })]
+      }))
+    }))
+  });
+}
+
+function softTableBorders() {
+  const border = { style: BorderStyle.SINGLE, size: 4, color: "DED8CE" };
+  return { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
+}
+
+function mediaToDocx(block, indent) {
+  const payload = block[block.type] || {};
+  const file = payload.type === "external" ? payload.external : payload.file;
+  const url = file?.url || payload.url || "";
+  const label = payload.caption?.length ? richTextToPlain(payload.caption) : block.type.toUpperCase();
+  const children = [new TextRun({ text: `${label}: `, bold: true })];
+  if (url) {
+    children.push(new ExternalHyperlink({ link: url, children: [new TextRun({ text: url, color: "1E6B8F", underline: {} })] }));
+  } else {
+    children.push(new TextRun({ text: "Archivo de Notion", color: "6B665F" }));
+  }
+  return [new Paragraph({ indent, children })];
+}
+
+function richTextToDocx(richText) {
+  const children = [];
+  for (const part of richText || []) {
+    if (part.type === "equation") {
+      const math = latexToOmmlComponent(part.equation?.expression || part.plain_text || "");
+      children.push(math || new TextRun({ text: part.equation?.expression || part.plain_text || "", font: "Consolas" }));
+      continue;
+    }
+    const runs = plainTextRuns(part.plain_text || part.text?.content || part.mention?.plain_text || "", part.annotations || {});
+    if (part.href) {
+      children.push(new ExternalHyperlink({
+        link: part.href,
+        children: plainTextRuns(part.plain_text || part.text?.content || part.mention?.plain_text || "", {
+          ...(part.annotations || {}),
+          linkStyle: true
+        })
+      }));
+    } else {
+      children.push(...runs);
+    }
+  }
+  return children.length ? children : [new TextRun("")];
+}
+
+function plainTextRuns(text, annotations = {}) {
+  const pieces = String(text || "").split(/\r?\n/);
+  return pieces.flatMap((piece, index) => {
+    const run = new TextRun({
+      text: piece,
+      break: index ? 1 : undefined,
+      bold: Boolean(annotations.bold),
+      italics: Boolean(annotations.italic),
+      strike: Boolean(annotations.strikethrough),
+      color: annotations.linkStyle ? "1E6B8F" : undefined,
+      underline: annotations.linkStyle || annotations.underline ? {} : undefined,
+      font: annotations.code ? "Consolas" : undefined,
+      shading: annotations.code ? { type: ShadingType.CLEAR, fill: "EFEDEA" } : undefined
+    });
+    return [run];
+  });
+}
+
+function propertyValueText(value) {
+  if (value?.kind === "relation") return (value.items || []).map((item) => item.title || item.id).join(", ");
+  if (Array.isArray(value)) return value.map(propertyValueText).filter(Boolean).join(", ");
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  if (value && typeof value === "object") return value.name || value.title || value.id || Object.values(value).map(propertyValueText).filter(Boolean).join(", ");
+  return String(value ?? "");
+}
+
+function dataUrlToBuffer(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:image\/(?:png|jpeg);base64,(.+)$/);
+  return match ? Buffer.from(match[1], "base64") : null;
+}
+
+function imageDimensions(width, height, maxWidth, maxHeight) {
+  const naturalWidth = Math.max(1, Number(width || maxWidth));
+  const naturalHeight = Math.max(1, Number(height || maxHeight));
+  const scale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1);
+  return {
+    width: Math.round(naturalWidth * scale),
+    height: Math.round(naturalHeight * scale)
+  };
+}
+
 async function serveStatic(req, res, pathname) {
   const target = pathname === "/" ? "/index.html" : pathname;
   const resolved = path.normalize(path.join(PUBLIC_DIR, target));
@@ -972,6 +1401,42 @@ async function handleApi(req, res, pathname) {
       pages.push(await fetchPageBundle(token, pageId));
     }
     sendJson(res, 200, { pages });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/export/docx") {
+    const bundles = Array.isArray(body.bundles) ? body.bundles.slice(0, 80) : [];
+    if (!bundles.length) throw httpError(400, "No pages were provided for DOCX export.");
+    const settings = normalizeWordSettings(body.settings || {});
+    const hiddenProperties = body.hiddenProperties || [];
+    const mermaidAssets = body.mermaidAssets || {};
+    const title = body.sourceName || bundles[0]?.title || "Notion export";
+
+    if (settings.exportMode === "separate" && bundles.length > 1) {
+      const zip = new JSZip();
+      for (const bundle of bundles) {
+        const buffer = await createDocxBuffer({
+          bundles: [bundle],
+          settings: { ...settings, exportMode: "single" },
+          hiddenProperties,
+          mermaidAssets,
+          title: bundle.title || title
+        });
+        zip.file(`${slugFileName(bundle.title || bundle.id || "notion-page")}.docx`, buffer);
+      }
+      const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+      sendBinary(res, 200, zipBuffer, MIME_TYPES[".zip"], `${slugFileName(title)}.zip`);
+      return;
+    }
+
+    const buffer = await createDocxBuffer({
+      bundles,
+      settings,
+      hiddenProperties,
+      mermaidAssets,
+      title
+    });
+    sendBinary(res, 200, buffer, MIME_TYPES[".docx"], `${slugFileName(title)}.docx`);
     return;
   }
 
