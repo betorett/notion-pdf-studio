@@ -1050,7 +1050,28 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
       children
     }]
   });
-  return Packer.toBuffer(doc);
+  return sanitizeDocxBuffer(await Packer.toBuffer(doc));
+}
+
+async function sanitizeDocxBuffer(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  let changed = false;
+  for (const name of Object.keys(zip.files).filter((fileName) => fileName.startsWith("word/") && fileName.endsWith(".xml"))) {
+    const file = zip.file(name);
+    if (!file) continue;
+    const original = await file.async("string");
+    const cleaned = original
+      .replace(/<undefined>/g, "")
+      .replace(/<\/undefined>/g, "")
+      .replace(/\s*m:val="undefined"/g, "");
+    if (cleaned !== original) {
+      zip.file(name, cleaned);
+      changed = true;
+    }
+  }
+  return changed
+    ? zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
+    : buffer;
 }
 
 async function bundleToDocxChildren(bundle, context) {
