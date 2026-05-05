@@ -992,7 +992,7 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
     if (index > 0 && wordSettings.startEachPageOnNewSheet) {
       children.push(new Paragraph({ children: [new PageBreak()] }));
     }
-    children.push(...bundleToDocxChildren(bundle, { settings: wordSettings, hidden, mermaidAssets }));
+    children.push(...await bundleToDocxChildren(bundle, { settings: wordSettings, hidden, mermaidAssets }));
   }
 
   const doc = new Document({
@@ -1052,7 +1052,7 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
   return Packer.toBuffer(doc);
 }
 
-function bundleToDocxChildren(bundle, context) {
+async function bundleToDocxChildren(bundle, context) {
   const children = [
     new Paragraph({
       style: "NotionTitle",
@@ -1063,7 +1063,7 @@ function bundleToDocxChildren(bundle, context) {
     children.push(...propertiesToDocx(bundle.properties || {}, context.hidden));
   }
   for (const block of flattenNotionBlocks(bundle.blocks || [])) {
-    children.push(...blockToDocx(block, context));
+    children.push(...await blockToDocx(block, context));
   }
   return children;
 }
@@ -1111,7 +1111,7 @@ function flattenNotionBlocks(blocks, depth = 0) {
   return out;
 }
 
-function blockToDocx(block, context) {
+async function blockToDocx(block, context) {
   const type = block.type || "unsupported";
   const indent = { left: Math.min(Number(block.depth || 0) * 360, 1440) };
   if (["heading_1", "heading_2", "heading_3"].includes(type)) {
@@ -1246,11 +1246,32 @@ function softTableBorders() {
   return { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
 }
 
-function mediaToDocx(block, indent) {
+async function mediaToDocx(block, indent) {
   const payload = block[block.type] || {};
   const file = payload.type === "external" ? payload.external : payload.file;
   const url = file?.url || payload.url || "";
   const label = payload.caption?.length ? richTextToPlain(payload.caption) : block.type.toUpperCase();
+  if (block.type === "image" && url) {
+    const image = await fetchImageForDocx(url);
+    if (image) {
+      const children = [new Paragraph({
+        indent,
+        alignment: AlignmentType.CENTER,
+        children: [new ImageRun({
+          data: image.data,
+          transformation: imageDimensions(image.width, image.height, 560, 420)
+        })]
+      })];
+      if (label && label !== "IMAGE") {
+        children.push(new Paragraph({
+          indent,
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: label, italics: true, color: "6B665F", size: 18 })]
+        }));
+      }
+      return children;
+    }
+  }
   const children = [new TextRun({ text: `${label}: `, bold: true })];
   if (url) {
     children.push(new ExternalHyperlink({ link: url, children: [new TextRun({ text: url, color: "1E6B8F", underline: {} })] }));
@@ -1258,6 +1279,57 @@ function mediaToDocx(block, indent) {
     children.push(new TextRun({ text: "Archivo de Notion", color: "6B665F" }));
   }
   return [new Paragraph({ indent, children })];
+}
+
+async function fetchImageForDocx(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Notion PDF Studio" }
+    });
+    if (!response.ok) return null;
+    const type = String(response.headers.get("content-type") || "").toLowerCase();
+    if (!type.includes("image/png") && !type.includes("image/jpeg") && !type.includes("image/jpg")) return null;
+    const size = Number(response.headers.get("content-length") || 0);
+    if (size > 12 * 1024 * 1024) return null;
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length > 12 * 1024 * 1024) return null;
+    return {
+      data,
+      ...imageSizeFromBuffer(data)
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function imageSizeFromBuffer(data) {
+  if (data.length >= 24 && data.toString("ascii", 1, 4) === "PNG") {
+    return {
+      width: data.readUInt32BE(16),
+      height: data.readUInt32BE(20)
+    };
+  }
+  if (data.length >= 4 && data[0] === 0xff && data[1] === 0xd8) {
+    let offset = 2;
+    while (offset < data.length) {
+      if (data[offset] !== 0xff) break;
+      const marker = data[offset + 1];
+      const length = data.readUInt16BE(offset + 2);
+      if (marker >= 0xc0 && marker <= 0xc3) {
+        return {
+          height: data.readUInt16BE(offset + 5),
+          width: data.readUInt16BE(offset + 7)
+        };
+      }
+      offset += 2 + length;
+    }
+  }
+  return { width: 560, height: 320 };
 }
 
 function richTextToDocx(richText) {
