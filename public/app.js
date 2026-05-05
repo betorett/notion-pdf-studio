@@ -26,6 +26,8 @@ const state = {
   },
   previewSettingsCollapsed: false,
   filtersCollapsed: false,
+  tablePage: 1,
+  tablePageSize: 10,
   previewVersion: 0,
   savedDatabases: [],
   exportHistory: [],
@@ -91,6 +93,7 @@ function bindElements() {
     "syncButton",
     "savedDatabases",
     "saveDbButton",
+    "quickPreviewGuideButton",
     "sourceMode",
     "searchInput",
     "selectAllButton",
@@ -112,10 +115,15 @@ function bindElements() {
     "dbSettingsSummary",
     "propertySettingsList",
     "closeDbSettingsButton",
+    "bulkCheckbox",
+    "clearSelectionButton",
+    "invertSelectionButton",
     "selectionCount",
     "pageCount",
     "tableHead",
     "pageRows",
+    "tablePager",
+    "pageSizeInput",
     "sheetCount",
     "togglePreviewSettingsButton",
     "previewSettingsPanel",
@@ -133,6 +141,10 @@ function bindElements() {
     "newSheetToggle",
     "status",
     "previewCanvas",
+    "readyExportSummary",
+    "readyExportMode",
+    "readyExportFormatInput",
+    "readyExportButton",
     "printDocument",
     "printStyle"
   ]) {
@@ -160,8 +172,20 @@ function bindEvents() {
   });
   els.syncButton.addEventListener("click", syncNotion);
   els.saveDbButton.addEventListener("click", saveCurrentDb);
-  els.searchInput.addEventListener("input", schedulePagesTable);
+  els.quickPreviewGuideButton.addEventListener("click", loadPreview);
+  els.searchInput.addEventListener("input", () => {
+    state.tablePage = 1;
+    schedulePagesTable();
+  });
   els.selectAllButton.addEventListener("click", toggleSelectAll);
+  els.bulkCheckbox.addEventListener("change", () => toggleCurrentPageSelection(els.bulkCheckbox.checked));
+  els.clearSelectionButton.addEventListener("click", clearSelection);
+  els.invertSelectionButton.addEventListener("click", invertVisibleSelection);
+  els.pageSizeInput.addEventListener("input", () => {
+    state.tablePageSize = Number(els.pageSizeInput.value) || 10;
+    state.tablePage = 1;
+    renderPagesTable();
+  });
   els.dbSettingsButton.addEventListener("click", () => {
     els.dbSettingsPanel.classList.toggle("hidden");
   });
@@ -172,6 +196,7 @@ function bindEvents() {
   els.exportWordButton.addEventListener("click", () => exportWord({ googleDocs: false }));
   els.exportGoogleDocsButton.addEventListener("click", () => exportWord({ googleDocs: true }));
   els.exportButton.addEventListener("click", exportPdf);
+  els.readyExportButton.addEventListener("click", exportFromReadyCard);
   els.applyQueryButton.addEventListener("click", syncNotion);
   els.addFilterButton.addEventListener("click", () => {
     state.filters.push(defaultFilter());
@@ -179,6 +204,7 @@ function bindEvents() {
   });
   els.clearFiltersButton.addEventListener("click", () => {
     state.filters = [];
+    state.tablePage = 1;
     renderFilters();
     syncNotion();
   });
@@ -324,6 +350,7 @@ async function syncNotion() {
     state.schema = payload.source.schema || {};
     state.pages = payload.pages || [];
     state.selected = new Set(state.pages.map((page) => page.id));
+    state.tablePage = 1;
     state.bundles = [];
     markPreviewDirty();
     state.dbSettings = normalizeDbSettings(state.dbSettings);
@@ -616,6 +643,8 @@ function sortableProperties() {
 function setSortFromControls() {
   const property = els.sortPropertyInput.value;
   state.sorts = property ? [{ property, direction: els.sortDirectionInput.value || "ascending" }] : [];
+  state.tablePage = 1;
+  renderPagesTable();
 }
 
 function renderDbSettings() {
@@ -765,7 +794,12 @@ function uniqueOptionsFromPages(name) {
 }
 
 function renderPagesTable() {
-  const visible = filteredVisiblePages();
+  const allVisible = filteredVisiblePages();
+  const pageSize = Math.max(1, Number(state.tablePageSize || 10));
+  const totalPages = Math.max(1, Math.ceil(allVisible.length / pageSize));
+  state.tablePage = Math.min(Math.max(1, Number(state.tablePage || 1)), totalPages);
+  const start = (state.tablePage - 1) * pageSize;
+  const visible = allVisible.slice(start, start + pageSize);
   const propNames = preferredPropertyColumns();
   els.tableHead.innerHTML = [
     `<th style="width:34px"><input id="headCheckbox" type="checkbox" ${visible.length && visible.every((page) => state.selected.has(page.id)) ? "checked" : ""}></th>`,
@@ -776,13 +810,11 @@ function renderPagesTable() {
 
   const checkbox = document.getElementById("headCheckbox");
   checkbox?.addEventListener("change", () => {
-    if (checkbox.checked) visible.forEach((page) => state.selected.add(page.id));
-    else visible.forEach((page) => state.selected.delete(page.id));
-    renderPagesTable();
+    toggleCurrentPageSelection(checkbox.checked);
   });
 
   els.pageRows.innerHTML = "";
-  if (!visible.length) {
+  if (!allVisible.length) {
     els.pageRows.innerHTML = `<tr><td colspan="${propNames.length + 3}" class="muted">No hay páginas que coincidan con la búsqueda.</td></tr>`;
   }
   for (const page of visible) {
@@ -803,19 +835,20 @@ function renderPagesTable() {
       renderSelectionMeta();
     });
   });
+  renderTablePager(allVisible.length, pageSize);
   renderSelectionMeta();
 }
 
 function filteredVisiblePages() {
   const query = els.searchInput.value.trim().toLowerCase();
-  if (!query) return state.pages;
-  return state.pages.filter((page) => {
+  const pages = !query ? state.pages : state.pages.filter((page) => {
     const haystack = [
       page.title,
       ...Object.values(page.properties || {}).map(propertyText)
     ].join(" ").toLowerCase();
     return haystack.includes(query);
   });
+  return applyClientSort(pages);
 }
 
 function applyClientSort(pages) {
@@ -844,8 +877,20 @@ function preferredPropertyColumns() {
 }
 
 function renderSelectionMeta() {
+  const visible = filteredVisiblePages();
+  const pageSize = Math.max(1, Number(state.tablePageSize || 10));
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  state.tablePage = Math.min(Math.max(1, Number(state.tablePage || 1)), totalPages);
+  const start = visible.length ? (state.tablePage - 1) * pageSize + 1 : 0;
+  const end = Math.min(visible.length, state.tablePage * pageSize);
+  const currentPageRows = visible.slice((state.tablePage - 1) * pageSize, (state.tablePage - 1) * pageSize + pageSize);
   els.selectionCount.textContent = `${state.selected.size} seleccionada${state.selected.size === 1 ? "" : "s"}`;
-  els.pageCount.textContent = `${state.pages.length} página${state.pages.length === 1 ? "" : "s"}`;
+  els.pageCount.textContent = visible.length
+    ? `${start}-${end} de ${visible.length} página${visible.length === 1 ? "" : "s"}`
+    : `0 de ${state.pages.length} página${state.pages.length === 1 ? "" : "s"}`;
+  els.bulkCheckbox.checked = Boolean(currentPageRows.length && currentPageRows.every((page) => state.selected.has(page.id)));
+  els.bulkCheckbox.indeterminate = Boolean(currentPageRows.some((page) => state.selected.has(page.id)) && !els.bulkCheckbox.checked);
+  updateReadyExportCard();
 }
 
 function toggleSelectAll() {
@@ -854,6 +899,67 @@ function toggleSelectAll() {
   if (allSelected) visible.forEach((page) => state.selected.delete(page.id));
   else visible.forEach((page) => state.selected.add(page.id));
   renderPagesTable();
+}
+
+function toggleCurrentPageSelection(checked) {
+  const visible = filteredVisiblePages();
+  const pageSize = Math.max(1, Number(state.tablePageSize || 10));
+  const current = visible.slice((state.tablePage - 1) * pageSize, state.tablePage * pageSize);
+  if (checked) current.forEach((page) => state.selected.add(page.id));
+  else current.forEach((page) => state.selected.delete(page.id));
+  renderPagesTable();
+}
+
+function clearSelection() {
+  state.selected.clear();
+  renderPagesTable();
+}
+
+function invertVisibleSelection() {
+  for (const page of filteredVisiblePages()) {
+    if (state.selected.has(page.id)) state.selected.delete(page.id);
+    else state.selected.add(page.id);
+  }
+  renderPagesTable();
+}
+
+function renderTablePager(totalRows, pageSize) {
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const buttons = [
+    `<button class="pager-button" type="button" data-page-action="prev" ${state.tablePage <= 1 ? "disabled" : ""}>‹</button>`
+  ];
+  const windowStart = Math.max(1, Math.min(state.tablePage - 1, totalPages - 2));
+  const windowEnd = Math.min(totalPages, windowStart + 2);
+  for (let page = windowStart; page <= windowEnd; page += 1) {
+    buttons.push(`<button class="pager-button ${page === state.tablePage ? "active" : ""}" type="button" data-page="${page}">${page}</button>`);
+  }
+  buttons.push(`<button class="pager-button" type="button" data-page-action="next" ${state.tablePage >= totalPages ? "disabled" : ""}>›</button>`);
+  els.tablePager.innerHTML = buttons.join("");
+  els.tablePager.querySelectorAll("button[data-page], button[data-page-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.page) state.tablePage = Number(button.dataset.page);
+      else if (button.dataset.pageAction === "prev") state.tablePage -= 1;
+      else if (button.dataset.pageAction === "next") state.tablePage += 1;
+      renderPagesTable();
+    });
+  });
+}
+
+async function exportFromReadyCard() {
+  const format = els.readyExportFormatInput.value;
+  if (format === "word") return exportWord({ googleDocs: false });
+  if (format === "google") return exportWord({ googleDocs: true });
+  return exportPdf();
+}
+
+function updateReadyExportCard() {
+  const selectedCount = state.selected.size;
+  const sheetCount = previewCache.sheetCount || 0;
+  els.readyExportSummary.textContent = `${selectedCount} página${selectedCount === 1 ? "" : "s"} seleccionada${selectedCount === 1 ? "" : "s"}`;
+  els.readyExportMode.textContent = sheetCount
+    ? `${sheetCount} hoja${sheetCount === 1 ? "" : "s"} en vista previa. Se exportará con los ajustes actuales.`
+    : "Carga la vista previa para confirmar saltos y márgenes antes de exportar.";
+  els.readyExportButton.disabled = state.loading || !selectedCount;
 }
 
 function renderPreview(force = false) {
@@ -877,6 +983,7 @@ function renderPreview(force = false) {
   els.printDocument.innerHTML = previewCache.printHtml;
   els.previewCanvas.dataset.previewKey = key;
   els.sheetCount.textContent = `${previewCache.sheetCount} hoja${previewCache.sheetCount === 1 ? "" : "s"}`;
+  updateReadyExportCard();
   updatePrintStyle();
   if (hasMathContent() && !window.katex) requestKatexRefresh();
   queueEnhancements();
@@ -1343,6 +1450,7 @@ function applySettingsToControls() {
   els.footerToggle.checked = state.settings.showFooter;
   els.propertiesToggle.checked = state.settings.showProperties;
   els.newSheetToggle.checked = state.settings.startEachPageOnNewSheet;
+  els.pageSizeInput.value = String(state.tablePageSize || 10);
 }
 
 function modeLabel(mode) {
@@ -1827,9 +1935,10 @@ function formatDate(value) {
 
 function setLoading(loading, message) {
   state.loading = loading;
-  for (const button of [els.syncButton, els.loadPreviewButton, els.exportButton, els.exportWordButton, els.exportGoogleDocsButton, els.saveDbButton]) {
+  for (const button of [els.syncButton, els.loadPreviewButton, els.exportButton, els.exportWordButton, els.exportGoogleDocsButton, els.saveDbButton, els.readyExportButton]) {
     button.disabled = loading;
   }
+  updateReadyExportCard();
   if (message) setStatus(message);
 }
 

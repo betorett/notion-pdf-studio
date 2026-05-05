@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#f4f3f0" />
     <title>Notion PDF Studio</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260505-ui" />
+    <link rel="stylesheet" href="/styles.css?v=20260505-structure" />
   </head>
   <body>
     <div id="app" class="shell">
@@ -47,6 +47,13 @@
           </div>
           <div id="savedDatabases" class="saved-list"></div>
           <button id="dbSettingsButton" class="button full soft" type="button">Ajustes de propiedades</button>
+        </section>
+
+        <section class="side-export-card" aria-label="Exportaciones profesionales">
+          <div class="side-export-icon" aria-hidden="true">✓</div>
+          <strong>Exportaciones profesionales</strong>
+          <p>Exporta a PDF, Word y Google Docs con estilo, márgenes y propiedades personalizadas.</p>
+          <button class="button full" type="button" id="quickPreviewGuideButton">Preparar vista previa</button>
         </section>
       </aside>
 
@@ -112,8 +119,15 @@
 
         <section class="table-wrap" aria-label="Tabla de páginas">
           <div class="table-meta">
-            <span id="selectionCount">0 seleccionadas</span>
-            <span id="pageCount">0 páginas</span>
+            <div class="selection-meta">
+              <input id="bulkCheckbox" type="checkbox" aria-label="Seleccionar páginas visibles" />
+              <span id="selectionCount">0 seleccionadas</span>
+            </div>
+            <div class="table-actions">
+              <button id="clearSelectionButton" class="meta-action" type="button">Deseleccionar</button>
+              <button id="invertSelectionButton" class="meta-action" type="button">Invertir</button>
+              <span id="pageCount">0 páginas</span>
+            </div>
           </div>
           <div class="notion-table">
             <table>
@@ -122,6 +136,17 @@
               </thead>
               <tbody id="pageRows"></tbody>
             </table>
+          </div>
+          <div class="table-footer" aria-label="Paginación">
+            <div class="pager" id="tablePager"></div>
+            <label class="page-size-control">
+              <select id="pageSizeInput">
+                <option value="10">10 por página</option>
+                <option value="20">20 por página</option>
+                <option value="50">50 por página</option>
+                <option value="100">100 por página</option>
+              </select>
+            </label>
           </div>
         </section>
       </main>
@@ -200,6 +225,21 @@
 
         <div id="status" class="status" role="status">Listo.</div>
         <div id="previewCanvas" class="preview-canvas"></div>
+        <section class="ready-export-card" aria-label="Listo para exportar">
+          <div class="ready-card-top">
+            <div>
+              <strong><span class="ready-dot" aria-hidden="true">✓</span> Listo para exportar</strong>
+              <span id="readyExportSummary">0 páginas seleccionadas</span>
+            </div>
+            <select id="readyExportFormatInput" aria-label="Formato de exportación">
+              <option value="pdf">PDF</option>
+              <option value="word">Word</option>
+              <option value="google">Google Docs</option>
+            </select>
+          </div>
+          <p id="readyExportMode">Se exportará con los ajustes actuales.</p>
+          <button id="readyExportButton" class="button primary full" type="button">Exportar ahora</button>
+        </section>
       </aside>
     </div>
 
