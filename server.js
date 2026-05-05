@@ -1037,7 +1037,7 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
       default: {
         document: {
           run: { font: "Arial", size: 22, color: "25231F" },
-          paragraph: { spacing: { after: 120 } }
+          paragraph: { alignment: AlignmentType.JUSTIFIED, spacing: { after: 120 } }
         }
       },
       paragraphStyles: [
@@ -1146,12 +1146,22 @@ function propertiesToDocx(properties, hidden) {
       children: [
         new TableCell({
           width: { size: 28, type: WidthType.PERCENTAGE },
+          margins: docxTableCellMargins(),
           shading: { type: ShadingType.CLEAR, fill: "F8F7F4" },
-          children: [new Paragraph({ children: [new TextRun({ text: name, bold: true, color: "6B665F" })] })]
+          children: [new Paragraph({
+            alignment: AlignmentType.LEFT,
+            spacing: { before: 20, after: 20 },
+            children: [new TextRun({ text: name, bold: true, color: "6B665F" })]
+          })]
         }),
         new TableCell({
           width: { size: 72, type: WidthType.PERCENTAGE },
-          children: [new Paragraph({ children: [new TextRun({ text: propertyValueText(value) || "Vacío" })] })]
+          margins: docxTableCellMargins(),
+          children: [new Paragraph({
+            alignment: AlignmentType.LEFT,
+            spacing: { before: 20, after: 20 },
+            children: [new TextRun({ text: propertyValueText(value) || "Vacío" })]
+          })]
         })
       ]
     }));
@@ -1163,7 +1173,7 @@ function propertiesToDocx(properties, hidden) {
       borders: softTableBorders(),
       rows
     }),
-    new Paragraph({ text: "" })
+    new Paragraph({ text: "", spacing: { after: 120 } })
   ];
 }
 
@@ -1192,17 +1202,19 @@ async function blockToDocx(block, context) {
     return [new Paragraph({ indent, children: [new TextRun({ text: richTextToPlain(block.heading_4?.rich_text || []), bold: true, size: 24 })] })];
   }
   if (type === "paragraph") {
-    return [new Paragraph({ indent, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
+    return [new Paragraph({ indent, alignment: AlignmentType.JUSTIFIED, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
   }
   if (type === "bulleted_list_item") {
     return [new Paragraph({
       numbering: { reference: "notion-bullet", level: listLevel(block) },
+      alignment: AlignmentType.JUSTIFIED,
       children: richTextToDocx(block.bulleted_list_item?.rich_text || [])
     })];
   }
   if (type === "numbered_list_item") {
     return [new Paragraph({
       numbering: { reference: "notion-number", level: listLevel(block) },
+      alignment: AlignmentType.JUSTIFIED,
       children: richTextToDocx(block.numbered_list_item?.rich_text || [])
     })];
   }
@@ -1246,7 +1258,7 @@ function listLevel(block) {
 function codeBlockToDocx(block, context, indent) {
   const text = richTextToPlain(block.code?.rich_text || []);
   if (String(block.code?.language || "").toLowerCase() === "mermaid") {
-    const asset = context.mermaidAssets?.[text];
+    const asset = mermaidAssetFor(context.mermaidAssets, text);
     if (asset?.data) {
       const image = dataUrlToImage(asset.data);
       if (image) {
@@ -1281,6 +1293,15 @@ function equationParagraph(expression, display, indent) {
       new TextRun({ text: String(expression || ""), font: "Consolas" })
     ]
   });
+}
+
+function mermaidAssetFor(assets, source) {
+  if (!assets) return null;
+  return assets[source] || assets[normalizeMermaidSource(source)] || null;
+}
+
+function normalizeMermaidSource(source) {
+  return String(source || "").replace(/\r\n/g, "\n").replace(/\s+$/g, "").trim();
 }
 
 function latexToOmmlComponent(expression) {
@@ -1321,18 +1342,51 @@ function tableToDocx(block) {
     borders: softTableBorders(),
     rows: rows.map((row, rowIndex) => new TableRow({
       tableHeader: rowIndex === 0 && Boolean(block.table?.has_column_header),
+      cantSplit: true,
       children: (row.table_row?.cells || []).map((cell) => new TableCell({
         verticalAlign: VerticalAlign.TOP,
-        shading: rowIndex === 0 && block.table?.has_column_header ? { type: ShadingType.CLEAR, fill: "F4F3F0" } : undefined,
-        children: [new Paragraph({ children: richTextToDocx(cell) })]
+        margins: docxTableCellMargins(),
+        shading: docxTableShading(block, rowIndex),
+        children: [docxTableCellParagraph(cell, rowIndex === 0 && block.table?.has_column_header)]
       }))
     }))
   });
 }
 
 function softTableBorders() {
-  const border = { style: BorderStyle.SINGLE, size: 4, color: "DED8CE" };
+  const border = { style: BorderStyle.SINGLE, size: 6, color: "D8D1C6" };
   return { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
+}
+
+function docxTableCellMargins() {
+  return {
+    top: 120,
+    bottom: 120,
+    left: 140,
+    right: 140
+  };
+}
+
+function docxTableShading(block, rowIndex) {
+  if (rowIndex === 0 && block.table?.has_column_header) {
+    return { type: ShadingType.CLEAR, fill: "EFEDEA" };
+  }
+  return rowIndex % 2 === 0 ? { type: ShadingType.CLEAR, fill: "FBFAF8" } : undefined;
+}
+
+function docxTableCellParagraph(cell, header = false) {
+  return new Paragraph({
+    alignment: AlignmentType.LEFT,
+    spacing: { before: 20, after: 20 },
+    children: header
+      ? tableHeaderRuns(cell)
+      : richTextToDocx(cell)
+  });
+}
+
+function tableHeaderRuns(cell) {
+  const text = richTextToPlain(cell);
+  return [new TextRun({ text: text || " ", bold: true, color: "4F4A44" })];
 }
 
 async function mediaToDocx(block, indent) {

@@ -1530,22 +1530,35 @@ async function collectMermaidAssets() {
   for (const node of nodes) {
     const source = node.getAttribute("data-mermaid-source") || "";
     const svg = node.querySelector("svg");
-    if (!source || !svg || assets[source]) continue;
+    if (!source || !svg || hasMermaidAsset(assets, source)) continue;
     try {
-      assets[source] = await svgToPngAsset(svg);
+      rememberMermaidAsset(assets, source, await svgToPngAsset(svg));
     } catch {
       // The server will fall back to the Mermaid source code.
     }
   }
   for (const source of mermaidSourcesFromBundles()) {
-    if (assets[source]) continue;
+    if (hasMermaidAsset(assets, source)) continue;
     try {
-      assets[source] = await renderMermaidSourceToPng(source);
+      rememberMermaidAsset(assets, source, await renderMermaidSourceToPng(source));
     } catch {
       // The server will fall back to the Mermaid source code.
     }
   }
   return assets;
+}
+
+function rememberMermaidAsset(assets, source, asset) {
+  assets[source] = asset;
+  assets[normalizeMermaidSource(source)] = asset;
+}
+
+function hasMermaidAsset(assets, source) {
+  return Boolean(assets[source] || assets[normalizeMermaidSource(source)]);
+}
+
+function normalizeMermaidSource(source) {
+  return String(source || "").replace(/\r\n/g, "\n").replace(/\s+$/g, "").trim();
 }
 
 function mermaidSourcesFromBundles() {
