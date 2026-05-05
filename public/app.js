@@ -1537,7 +1537,61 @@ async function collectMermaidAssets() {
       // The server will fall back to the Mermaid source code.
     }
   }
+  for (const source of mermaidSourcesFromBundles()) {
+    if (assets[source]) continue;
+    try {
+      assets[source] = await renderMermaidSourceToPng(source);
+    } catch {
+      // The server will fall back to the Mermaid source code.
+    }
+  }
   return assets;
+}
+
+function mermaidSourcesFromBundles() {
+  return Array.from(new Set(state.bundles
+    .flatMap((bundle) => flattenBlocks(bundle.blocks || []))
+    .filter(isMermaidBlock)
+    .map(blockPlainText)
+    .filter((source) => source.trim())));
+}
+
+async function renderMermaidSourceToPng(source) {
+  await ensureMermaid();
+  if (!mermaidReady) {
+    window.mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#f6f5f1",
+        primaryTextColor: "#25231f",
+        primaryBorderColor: "#d8d1c6",
+        lineColor: "#7b756c",
+        fontFamily: "ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif",
+        tertiaryColor: "#fbfaf8"
+      }
+    });
+    mermaidReady = true;
+  }
+  const id = `mermaid-word-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const result = await window.mermaid.render(id, source);
+  const host = document.createElement("div");
+  host.className = "mermaid-export-host";
+  host.style.position = "fixed";
+  host.style.left = "-12000px";
+  host.style.top = "0";
+  host.style.width = "900px";
+  host.style.background = "#fff";
+  host.innerHTML = result.svg;
+  document.body.appendChild(host);
+  try {
+    const svg = host.querySelector("svg");
+    if (!svg) throw new Error("Mermaid no devolvió SVG.");
+    return await svgToPngAsset(svg);
+  } finally {
+    host.remove();
+  }
 }
 
 async function svgToPngAsset(svg) {

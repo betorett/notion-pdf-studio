@@ -14,6 +14,7 @@ const {
   Header,
   HeadingLevel,
   ImageRun,
+  LevelFormat,
   Packer,
   PageBreak,
   PageNumber,
@@ -1000,6 +1001,38 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
     creator: "Notion PDF Studio",
     title: title || "Exportación Notion",
     description: "Documento exportado desde Notion PDF Studio",
+    numbering: {
+      config: [
+        {
+          reference: "notion-bullet",
+          levels: Array.from({ length: 9 }, (_, level) => ({
+            level,
+            format: LevelFormat.BULLET,
+            text: "•",
+            alignment: AlignmentType.LEFT,
+            style: {
+              paragraph: {
+                indent: { left: 360 + level * 360, hanging: 220 }
+              }
+            }
+          }))
+        },
+        {
+          reference: "notion-number",
+          levels: Array.from({ length: 9 }, (_, level) => ({
+            level,
+            format: LevelFormat.DECIMAL,
+            text: `%${level + 1}.`,
+            alignment: AlignmentType.LEFT,
+            style: {
+              paragraph: {
+                indent: { left: 420 + level * 360, hanging: 260 }
+              }
+            }
+          }))
+        }
+      ]
+    },
     styles: {
       default: {
         document: {
@@ -1162,10 +1195,16 @@ async function blockToDocx(block, context) {
     return [new Paragraph({ indent, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
   }
   if (type === "bulleted_list_item") {
-    return [new Paragraph({ indent: { ...indent, hanging: 220 }, children: [new TextRun({ text: "•  " }), ...richTextToDocx(block.bulleted_list_item?.rich_text || [])] })];
+    return [new Paragraph({
+      numbering: { reference: "notion-bullet", level: listLevel(block) },
+      children: richTextToDocx(block.bulleted_list_item?.rich_text || [])
+    })];
   }
   if (type === "numbered_list_item") {
-    return [new Paragraph({ indent: { ...indent, hanging: 260 }, children: [new TextRun({ text: `${block.listIndex || 1}.  ` }), ...richTextToDocx(block.numbered_list_item?.rich_text || [])] })];
+    return [new Paragraph({
+      numbering: { reference: "notion-number", level: listLevel(block) },
+      children: richTextToDocx(block.numbered_list_item?.rich_text || [])
+    })];
   }
   if (type === "to_do") {
     return [new Paragraph({ indent, children: [new TextRun({ text: block.to_do?.checked ? "☑  " : "☐  " }), ...richTextToDocx(block.to_do?.rich_text || [])] })];
@@ -1198,6 +1237,10 @@ async function blockToDocx(block, context) {
     return [new Paragraph({ indent, children: [new TextRun({ text: `↳ ${block[type]?.title || type.replaceAll("_", " ")}`, color: "6B665F" })] })];
   }
   return [new Paragraph({ indent, children: [new TextRun({ text: `Bloque de Notion no soportado: ${type}`, italics: true, color: "8A8176" })] })];
+}
+
+function listLevel(block) {
+  return Math.max(0, Math.min(8, Number(block.depth || 0)));
 }
 
 function codeBlockToDocx(block, context, indent) {
