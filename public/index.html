@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#f4f3f0" />
     <title>Notion PDF Studio</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260505-ui" />
   </head>
   <body>
     <div id="app" class="shell">
@@ -38,11 +38,15 @@
           </div>
         </section>
 
-        <section class="side-section">
-          <div class="section-title">DB guardadas</div>
+        <section class="side-section saved-db-section">
+          <div class="section-title section-title-row">
+            <span>DB guardadas</span>
+            <button id="saveDbButton" class="icon-button subtle-icon" type="button" title="Guardar DB" aria-label="Guardar DB">
+              <span aria-hidden="true">+</span>
+            </button>
+          </div>
           <div id="savedDatabases" class="saved-list"></div>
-          <button id="dbSettingsButton" class="button full" type="button">Ajustes de propiedades</button>
-          <button id="saveDbButton" class="button full" type="button">Guardar DB</button>
+          <button id="dbSettingsButton" class="button full soft" type="button">Ajustes de propiedades</button>
         </section>
       </aside>
 
@@ -59,9 +63,11 @@
             </label>
             <button id="selectAllButton" class="button" type="button">Seleccionar</button>
             <button id="loadPreviewButton" class="button strong" type="button">Vista previa</button>
-            <button id="exportWordButton" class="button" type="button">Exportar Word</button>
-            <button id="exportGoogleDocsButton" class="button" type="button">Google Docs</button>
-            <button id="exportButton" class="button primary" type="button">Exportar PDF</button>
+            <div class="export-group" aria-label="Exportación">
+              <button id="exportButton" class="button primary" type="button">Exportar PDF</button>
+              <button id="exportWordButton" class="button" type="button">Word</button>
+              <button id="exportGoogleDocsButton" class="button" type="button">Google Docs</button>
+            </div>
           </div>
         </header>
 
@@ -133,6 +139,12 @@
             <span id="sheetCount" class="pill">0 hojas</span>
           </div>
         </div>
+
+        <nav class="preview-tabs" aria-label="Formatos de vista previa">
+          <span class="active">Vista previa</span>
+          <span>PDF</span>
+          <span>Word</span>
+        </nav>
 
         <section id="previewSettingsPanel" class="settings">
           <div class="setting-grid">

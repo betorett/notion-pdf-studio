@@ -468,10 +468,19 @@ function renderSavedDatabases() {
     return;
   }
   for (const saved of savedDatabases) {
+    const shell = document.createElement("div");
+    shell.className = `saved-item-shell ${state.source?.sourceId === saved.sourceId ? "active" : ""}`;
     const button = document.createElement("button");
     button.className = `saved-item ${state.source?.sourceId === saved.sourceId ? "active" : ""}`;
     button.type = "button";
-    button.innerHTML = `<strong>${escapeHtml(saved.name || "DB sin título")}</strong><span>${escapeHtml(saved.sourceId || "")}</span>`;
+    button.innerHTML = `
+      <span class="saved-db-icon" aria-hidden="true"></span>
+      <span class="saved-copy">
+        <strong>${escapeHtml(saved.name || "DB sin título")}</strong>
+        <span>${escapeHtml(saved.sourceId || "")}</span>
+        <small>Última sincronización: ${saved.lastSyncedAt ? formatDate(saved.lastSyncedAt) : "sin registro"}</small>
+      </span>
+    `;
     button.addEventListener("click", () => {
       els.sourceInput.value = saved.sourceId;
       state.filters = saved.filters || [];
@@ -484,7 +493,21 @@ function renderSavedDatabases() {
       renderDbSettings();
       syncNotion();
     });
-    els.savedDatabases.appendChild(button);
+    const settingsButton = document.createElement("button");
+    settingsButton.className = "saved-settings icon-button subtle-icon";
+    settingsButton.type = "button";
+    settingsButton.title = "Ajustes de propiedades";
+    settingsButton.setAttribute("aria-label", `Ajustes de propiedades de ${saved.name || "DB guardada"}`);
+    settingsButton.innerHTML = `<span aria-hidden="true">⚙</span>`;
+    settingsButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      els.sourceInput.value = saved.sourceId;
+      state.dbSettings = normalizeDbSettings(saved.dbSettings);
+      renderDbSettings();
+      els.dbSettingsPanel.classList.remove("hidden");
+    });
+    shell.append(button, settingsButton);
+    els.savedDatabases.appendChild(shell);
   }
 }
 
