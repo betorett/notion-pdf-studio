@@ -1069,6 +1069,21 @@ async function sanitizeDocxBuffer(buffer) {
       changed = true;
     }
   }
+  const relsFile = zip.file("word/_rels/document.xml.rels");
+  let relsXml = relsFile ? await relsFile.async("string") : "";
+  for (const name of Object.keys(zip.files).filter((fileName) => fileName.startsWith("word/media/") && fileName.endsWith(".undefined"))) {
+    const file = zip.file(name);
+    if (!file) continue;
+    const data = await file.async("nodebuffer");
+    const info = imageInfoFromBuffer(data);
+    if (!info.type) continue;
+    const fixedName = name.replace(/\.undefined$/, `.${info.type === "jpg" ? "jpg" : "png"}`);
+    zip.file(fixedName, data);
+    zip.remove(name);
+    relsXml = relsXml.replaceAll(name.replace(/^word\//, ""), fixedName.replace(/^word\//, ""));
+    changed = true;
+  }
+  if (relsFile && relsXml) zip.file("word/_rels/document.xml.rels", relsXml);
   return changed
     ? zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
     : buffer;
@@ -1190,13 +1205,14 @@ function codeBlockToDocx(block, context, indent) {
   if (String(block.code?.language || "").toLowerCase() === "mermaid") {
     const asset = context.mermaidAssets?.[text];
     if (asset?.data) {
-      const data = dataUrlToBuffer(asset.data);
-      if (data) {
+      const image = dataUrlToImage(asset.data);
+      if (image) {
         return [new Paragraph({
           indent,
           alignment: AlignmentType.CENTER,
           children: [new ImageRun({
-            data,
+            data: image.data,
+            type: image.type,
             transformation: imageDimensions(asset.width, asset.height, 520, 320)
           })]
         })];
@@ -1289,6 +1305,7 @@ async function mediaToDocx(block, indent) {
         alignment: AlignmentType.CENTER,
         children: [new ImageRun({
           data: image.data,
+          type: image.type,
           transformation: imageDimensions(image.width, image.height, 560, 420)
         })]
       })];
@@ -1326,10 +1343,9 @@ async function fetchImageForDocx(url) {
     if (size > 12 * 1024 * 1024) return null;
     const data = Buffer.from(await response.arrayBuffer());
     if (data.length > 12 * 1024 * 1024) return null;
-    return {
-      data,
-      ...imageSizeFromBuffer(data)
-    };
+    const imageInfo = imageInfoFromBuffer(data);
+    if (!imageInfo.type) return null;
+    return { data, ...imageInfo };
   } catch {
     return null;
   } finally {
@@ -1337,9 +1353,10 @@ async function fetchImageForDocx(url) {
   }
 }
 
-function imageSizeFromBuffer(data) {
+function imageInfoFromBuffer(data) {
   if (data.length >= 24 && data.toString("ascii", 1, 4) === "PNG") {
     return {
+      type: "png",
       width: data.readUInt32BE(16),
       height: data.readUInt32BE(20)
     };
@@ -1352,6 +1369,7 @@ function imageSizeFromBuffer(data) {
       const length = data.readUInt16BE(offset + 2);
       if (marker >= 0xc0 && marker <= 0xc3) {
         return {
+          type: "jpg",
           height: data.readUInt16BE(offset + 5),
           width: data.readUInt16BE(offset + 7)
         };
@@ -1359,7 +1377,7 @@ function imageSizeFromBuffer(data) {
       offset += 2 + length;
     }
   }
-  return { width: 560, height: 320 };
+  return { type: "", width: 560, height: 320 };
 }
 
 function richTextToDocx(richText) {
@@ -1412,9 +1430,13 @@ function propertyValueText(value) {
   return String(value ?? "");
 }
 
-function dataUrlToBuffer(dataUrl) {
-  const match = String(dataUrl || "").match(/^data:image\/(?:png|jpeg);base64,(.+)$/);
-  return match ? Buffer.from(match[1], "base64") : null;
+function dataUrlToImage(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/);
+  if (!match) return null;
+  return {
+    type: match[1] === "png" ? "png" : "jpg",
+    data: Buffer.from(match[2], "base64")
+  };
 }
 
 function imageDimensions(width, height, maxWidth, maxHeight) {
