@@ -1050,7 +1050,7 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
         { id: "NotionHeading1", name: "Notion Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 34, bold: true, color: "25231F" }, paragraph: { spacing: { before: 260, after: 120 }, keepNext: true } },
         { id: "NotionHeading2", name: "Notion Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 28, bold: true, color: "25231F" }, paragraph: { spacing: { before: 220, after: 100 }, keepNext: true } },
         { id: "NotionHeading3", name: "Notion Heading 3", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 24, bold: true, color: "25231F" }, paragraph: { spacing: { before: 180, after: 80 }, keepNext: true } },
-        { id: "NotionHeading4", name: "Notion Heading 4", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 22, bold: true, color: "37352F" }, paragraph: { spacing: { before: 140, after: 60 }, keepNext: true } },
+        { id: "NotionHeading4", name: "Notion Heading 4", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 20, bold: true, color: "37352F" }, paragraph: { spacing: { before: 120, after: 50 }, keepNext: true } },
         { id: "NotionCode", name: "Notion Code", basedOn: "Normal", run: { font: "Consolas", size: 19, color: "25231F" }, paragraph: { shading: { type: ShadingType.CLEAR, fill: "F4F3F0" }, spacing: { before: 80, after: 140 } } }
       ]
     },
@@ -1209,7 +1209,7 @@ async function blockToDocx(block, context) {
     return [new Paragraph({ style, indent, children: richTextToDocx(block[type]?.rich_text || [], { bold: true, font: "Segoe UI", size, color: "25231F" }) })];
   }
   if (type === "heading_4") {
-    return [new Paragraph({ style: "NotionHeading4", indent, children: richTextToDocx(block.heading_4?.rich_text || [], { bold: true, font: "Segoe UI", size: 22, color: "37352F" }) })];
+    return [new Paragraph({ style: "NotionHeading4", indent, children: richTextToDocx(block.heading_4?.rich_text || [], { bold: true, font: "Segoe UI", size: 20, color: "37352F" }) })];
   }
   if (type === "paragraph") {
     return [new Paragraph({ indent, alignment: AlignmentType.JUSTIFIED, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
@@ -1291,7 +1291,7 @@ function codeBlockToDocx(block, context, indent) {
 }
 
 function equationParagraph(expression, display, indent) {
-  const math = latexToOmmlComponent(expression);
+  const math = latexToOmmlComponent(expression) || latexTextToOmmlComponent(expression);
   if (math) {
     return new Paragraph({ indent, alignment: display ? AlignmentType.CENTER : undefined, children: [math] });
   }
@@ -1314,7 +1314,7 @@ function normalizeMermaidSource(source) {
 }
 
 function latexToOmmlComponent(expression) {
-  const source = String(expression || "").trim();
+  const source = normalizeLatexExpression(expression);
   if (!source) return null;
   try {
     const mathmlHtml = katex.renderToString(source, {
@@ -1332,6 +1332,35 @@ function latexToOmmlComponent(expression) {
   } catch {
     return null;
   }
+}
+
+function normalizeLatexExpression(expression) {
+  return String(expression || "")
+    .trim()
+    .replace(/^\\\(/, "")
+    .replace(/\\\)$/, "")
+    .replace(/^\\\[/, "")
+    .replace(/\\\]$/, "")
+    .replace(/^\${1,2}/, "")
+    .replace(/\${1,2}$/, "")
+    .trim();
+}
+
+function latexTextToOmmlComponent(expression) {
+  const source = normalizeLatexExpression(expression);
+  if (!source) return null;
+  return xmlToDocxComponent(
+    `<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>${escapeXml(source)}</m:t></m:r></m:oMath>`
+  );
+}
+
+function escapeXml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }
 
 function xmlToDocxComponent(xml) {
@@ -1533,7 +1562,7 @@ function richTextToDocx(richText, defaults = {}) {
   const children = [];
   for (const part of richText || []) {
     if (part.type === "equation") {
-      const math = latexToOmmlComponent(part.equation?.expression || part.plain_text || "");
+      const math = latexToOmmlComponent(part.equation?.expression || part.plain_text || "") || latexTextToOmmlComponent(part.equation?.expression || part.plain_text || "");
       children.push(math || new TextRun({ text: part.equation?.expression || part.plain_text || "", font: "Consolas" }));
       continue;
     }

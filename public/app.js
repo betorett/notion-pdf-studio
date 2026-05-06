@@ -59,6 +59,7 @@ let mermaidPromise = null;
 let katexCssPromise = null;
 let katexRefreshQueued = false;
 let tokenSaveTimer = 0;
+const mermaidSizeCache = new Map();
 const previewCache = {
   key: "",
   previewHtml: "",
@@ -988,9 +989,12 @@ function queueEnhancements() {
 
 async function renderEnhancements(run = ++enhancementRun) {
   if (run !== enhancementRun) return;
-  await renderMermaidDiagrams(els.previewCanvas, "preview");
+  let learnedMermaidSize = await renderMermaidDiagrams(els.previewCanvas, "preview");
   if (run !== enhancementRun) return;
-  await renderMermaidDiagrams(els.printDocument, "print");
+  learnedMermaidSize = (await renderMermaidDiagrams(els.printDocument, "print")) || learnedMermaidSize;
+  if (learnedMermaidSize && run === enhancementRun) {
+    requestAnimationFrame(() => renderPreview(true));
+  }
 }
 
 function previewCacheKey() {
@@ -1068,60 +1072,81 @@ function paginateTableItem(measureHost, item, current, pages, usableBodyHeight, 
     return current;
   }
 
-  pages.push(current);
-  current = newSheet(title);
-  if (fullMeasured.height <= usableBodyHeight) {
-    current.items.push(item);
-    current.used += fullMeasured.height;
-    return current;
-  }
-
-  const chunks = splitTableByMeasuredRows(measureHost, item, usableBodyHeight);
-  for (const chunk of chunks) {
-    const measured = measurePreviewItem(measureHost, chunk);
-    if (current.items.length && current.used + measured.height > usableBodyHeight) {
+  if (fullMeasured.height > usableBodyHeight) {
+    if (current.items.length) {
       pages.push(current);
       current = newSheet(title);
     }
-    current.items.push(chunk);
-    current.used += measured.height;
+    return paginateOversizedTable(measureHost, item, current, pages, usableBodyHeight, title);
   }
+
+  pages.push(current);
+  current = newSheet(title);
+  current.items.push(item);
+  current.used += fullMeasured.height;
   return current;
 }
 
-function splitTableByMeasuredRows(measureHost, item, maxHeight) {
-  const block = item.block;
-  const rows = block.children || [];
-  if (rows.length <= 1) return [item];
-  const hasHeader = Boolean(block.table?.has_column_header);
-  const header = hasHeader ? rows[0] : null;
+function paginateOversizedTable(measureHost, item, current, pages, usableBodyHeight, title) {
+  const rows = item.block?.children || [];
+  if (!rows.length) return current;
+
+  const hasHeader = Boolean(item.block?.table?.has_column_header) && rows.length > 1;
+  const headerRows = hasHeader ? [rows[0]] : [];
   const bodyRows = hasHeader ? rows.slice(1) : rows;
-  const chunks = [];
-  let currentRows = [];
+  let chunk = [];
+
+  const commitChunk = (rowsToCommit) => {
+    if (!rowsToCommit.length && !headerRows.length) return;
+    let tableItem = tableItemWithRows(item, [...headerRows, ...rowsToCommit]);
+    let measured = measurePreviewItem(measureHost, tableItem);
+    if (measured.height > usableBodyHeight) {
+      tableItem = fitTableItemToPage(measureHost, tableItem, usableBodyHeight);
+      measured = measurePreviewItem(measureHost, tableItem);
+    }
+    current.items.push(tableItem);
+    current.used += Math.min(measured.height, usableBodyHeight);
+  };
+
+  if (!bodyRows.length) {
+    commitChunk([]);
+    return current;
+  }
 
   for (const row of bodyRows) {
-    const candidateRows = [...currentRows, row];
-    const candidate = tableItemWithRows(item, header ? [header, ...candidateRows] : candidateRows, chunks.length);
-    const measured = measurePreviewItem(measureHost, candidate);
-    if (currentRows.length && measured.height > maxHeight) {
-      chunks.push(tableItemWithRows(item, header ? [header, ...currentRows] : currentRows, chunks.length));
-      currentRows = [row];
-    } else {
-      currentRows = candidateRows;
+    const candidate = [...chunk, row];
+    const measured = measurePreviewItem(measureHost, tableItemWithRows(item, [...headerRows, ...candidate]));
+    if (chunk.length && measured.height > usableBodyHeight) {
+      commitChunk(chunk);
+      pages.push(current);
+      current = newSheet(title);
+      chunk = [row];
+      continue;
     }
+    chunk = candidate;
   }
-  if (currentRows.length) {
-    chunks.push(tableItemWithRows(item, header ? [header, ...currentRows] : currentRows, chunks.length));
-  }
-  return chunks.length ? chunks : [item];
+
+  commitChunk(chunk);
+  return current;
 }
 
-function tableItemWithRows(item, rows, index) {
+function fitTableItemToPage(measureHost, item, maxHeight) {
+  const measured = measurePreviewItem(measureHost, item);
+  const fitScale = Math.max(0.42, Math.min(1, (maxHeight - 6) / Math.max(1, measured.height)));
   return {
     ...item,
     block: {
       ...item.block,
-      id: `${item.block.id || "table"}-page-${index}`,
+      fitScale
+    }
+  };
+}
+
+function tableItemWithRows(item, rows) {
+  return {
+    ...item,
+    block: {
+      ...item.block,
       children: rows
     }
   };
@@ -1378,7 +1403,11 @@ function renderBlock(block) {
   if (type === "code") {
     if (isMermaidBlock(block)) {
       const source = blockPlainText(block);
-      return `<div class="block mermaid-diagram" ${depthStyle} data-mermaid-source="${escapeAttr(source)}"><pre>${escapeHtml(source)}</pre></div>`;
+      const dimensions = mermaidSizeCache.get(source);
+      const mermaidStyle = dimensions
+        ? `${block.depth ? `margin-left:${Math.min(block.depth * 22, 88)}px;` : ""}--mermaid-aspect:${Math.max(0.45, Math.min(2.2, dimensions.width / Math.max(1, dimensions.height))).toFixed(4)};`
+        : (block.depth ? `margin-left:${Math.min(block.depth * 22, 88)}px` : "");
+      return `<div class="block mermaid-diagram" ${mermaidStyle ? `style="${mermaidStyle}"` : ""} data-mermaid-source="${escapeAttr(source)}"><pre>${escapeHtml(source)}</pre></div>`;
     }
     const text = richTextToHtml(block.code?.rich_text || []);
     return `<pre class="block code" ${depthStyle}>${text}</pre>`;
@@ -1438,7 +1467,8 @@ function renderBlock(block) {
 function renderTable(block) {
   const rows = block.children || [];
   if (!rows.length) return `<div class="block unsupported">Tabla vacía</div>`;
-  return `<div class="notion-table-block"><table><tbody>${rows
+  const fitStyle = block.fitScale ? `style="--table-fit:${Number(block.fitScale).toFixed(3)}"` : "";
+  return `<div class="notion-table-block" ${fitStyle}><table><tbody>${rows
     .map((row, rowIndex) => `<tr>${(row.table_row?.cells || [])
       .map((cell) => rowIndex === 0 && block.table?.has_column_header
         ? `<th>${richTextToHtml(cell)}</th>`
@@ -1669,9 +1699,10 @@ function propertyText(value) {
 }
 
 async function renderMermaidDiagrams(root, scope) {
-  if (!root) return;
+  if (!root) return false;
   const diagrams = Array.from(root.querySelectorAll(".mermaid-diagram:not([data-rendered='true'])"));
-  if (!diagrams.length) return;
+  if (!diagrams.length) return false;
+  let learnedSize = false;
   try {
     await ensureMermaid();
   } catch {
@@ -1681,13 +1712,17 @@ async function renderMermaidDiagrams(root, scope) {
       node.innerHTML = `<strong>No se pudo cargar Mermaid.</strong><pre>${escapeHtml(source)}</pre>`;
       node.dataset.rendered = "true";
     });
-    return;
+    return false;
   }
-  if (!window.mermaid) return;
+  if (!window.mermaid) return false;
   if (!mermaidReady) {
     window.mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
+      flowchart: {
+        htmlLabels: false,
+        useMaxWidth: false
+      },
       theme: "base",
       themeVariables: {
         primaryColor: "#f6f5f1",
@@ -1709,13 +1744,21 @@ async function renderMermaidDiagrams(root, scope) {
       const id = `mermaid-${scope}-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
       const result = await window.mermaid.render(id, source);
       node.innerHTML = result.svg;
-      fitMermaidSvg(node);
+      const dimensions = fitMermaidSvg(node);
+      if (dimensions) {
+        const previous = mermaidSizeCache.get(source);
+        if (!previous || Math.abs(previous.width - dimensions.width) > 2 || Math.abs(previous.height - dimensions.height) > 2) {
+          mermaidSizeCache.set(source, dimensions);
+          learnedSize = true;
+        }
+      }
       node.dataset.rendered = "true";
     } catch (error) {
       node.classList.add("mermaid-error");
       node.innerHTML = `<strong>No se pudo renderizar el diagrama Mermaid.</strong><pre>${escapeHtml(source)}</pre>`;
     }
   }
+  return learnedSize;
 }
 
 async function collectMermaidAssets() {
@@ -1873,15 +1916,44 @@ function cloneSvgForExport(svg) {
   clone.setAttribute("width", width);
   clone.setAttribute("height", height);
   inlineSvgComputedStyles(svg, clone);
+  replaceForeignObjectLabels(svg, clone);
   clone.querySelectorAll("style").forEach((style) => {
     style.textContent = style.textContent.replace(/@import[^;]+;/g, "");
   });
   return clone;
 }
 
+function replaceForeignObjectLabels(sourceSvg, targetSvg) {
+  const sourceObjects = Array.from(sourceSvg.querySelectorAll("foreignObject"));
+  const targetObjects = Array.from(targetSvg.querySelectorAll("foreignObject"));
+  sourceObjects.forEach((sourceObject, index) => {
+    const targetObject = targetObjects[index];
+    if (!targetObject) return;
+    const label = sourceObject.textContent?.replace(/\s+/g, " ").trim();
+    if (!label) return;
+    const x = Number(sourceObject.getAttribute("x") || 0);
+    const y = Number(sourceObject.getAttribute("y") || 0);
+    const width = Number(sourceObject.getAttribute("width") || 0);
+    const height = Number(sourceObject.getAttribute("height") || 0);
+    const labelElement = sourceObject.querySelector("span, div, p") || sourceObject;
+    const computed = window.getComputedStyle(labelElement);
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", String(x + width / 2));
+    text.setAttribute("y", String(y + height / 2));
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "middle");
+    text.setAttribute("fill", computed.color || "#25231f");
+    text.setAttribute("font-family", computed.fontFamily || "Segoe UI, Arial, sans-serif");
+    text.setAttribute("font-size", computed.fontSize || "14px");
+    text.setAttribute("font-weight", computed.fontWeight || "400");
+    text.textContent = label;
+    targetObject.replaceWith(text);
+  });
+}
+
 function fitMermaidSvg(container) {
   const svg = container.querySelector("svg");
-  if (!svg) return;
+  if (!svg) return null;
   const box = svg.viewBox?.baseVal;
   const width = Number(svg.getAttribute("width")) || box?.width || svg.getBoundingClientRect().width || 900;
   const height = Number(svg.getAttribute("height")) || box?.height || svg.getBoundingClientRect().height || 520;
@@ -1889,7 +1961,9 @@ function fitMermaidSvg(container) {
   svg.removeAttribute("width");
   svg.removeAttribute("height");
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  container.style.aspectRatio = `${width} / ${height}`;
+  const ratio = Math.max(0.45, Math.min(2.2, width / Math.max(1, height)));
+  container.style.setProperty("--mermaid-aspect", ratio.toFixed(4));
+  return { width, height };
 }
 
 function inlineSvgComputedStyles(sourceSvg, targetSvg) {
