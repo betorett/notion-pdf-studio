@@ -1205,10 +1205,11 @@ async function blockToDocx(block, context) {
   const indent = { left: Math.min(Number(block.depth || 0) * 360, 1440) };
   if (["heading_1", "heading_2", "heading_3"].includes(type)) {
     const style = type === "heading_1" ? "NotionHeading1" : type === "heading_2" ? "NotionHeading2" : "NotionHeading3";
-    return [new Paragraph({ style, indent, children: richTextToDocx(block[type]?.rich_text || []) })];
+    const size = type === "heading_1" ? 34 : type === "heading_2" ? 28 : 24;
+    return [new Paragraph({ style, indent, children: richTextToDocx(block[type]?.rich_text || [], { bold: true, font: "Segoe UI", size, color: "25231F" }) })];
   }
   if (type === "heading_4") {
-    return [new Paragraph({ style: "NotionHeading4", indent, children: richTextToDocx(block.heading_4?.rich_text || []) })];
+    return [new Paragraph({ style: "NotionHeading4", indent, children: richTextToDocx(block.heading_4?.rich_text || [], { bold: true, font: "Segoe UI", size: 22, color: "37352F" }) })];
   }
   if (type === "paragraph") {
     return [new Paragraph({ indent, alignment: AlignmentType.JUSTIFIED, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
@@ -1528,7 +1529,7 @@ function imageInfoFromBuffer(data) {
   return { type: "", width: 560, height: 320 };
 }
 
-function richTextToDocx(richText) {
+function richTextToDocx(richText, defaults = {}) {
   const children = [];
   for (const part of richText || []) {
     if (part.type === "equation") {
@@ -1536,14 +1537,14 @@ function richTextToDocx(richText) {
       children.push(math || new TextRun({ text: part.equation?.expression || part.plain_text || "", font: "Consolas" }));
       continue;
     }
-    const runs = plainTextRuns(part.plain_text || part.text?.content || part.mention?.plain_text || "", part.annotations || {});
+    const runs = plainTextRuns(part.plain_text || part.text?.content || part.mention?.plain_text || "", part.annotations || {}, defaults);
     if (part.href) {
       children.push(new ExternalHyperlink({
         link: part.href,
         children: plainTextRuns(part.plain_text || part.text?.content || part.mention?.plain_text || "", {
           ...(part.annotations || {}),
           linkStyle: true
-        })
+        }, defaults)
       }));
     } else {
       children.push(...runs);
@@ -1552,18 +1553,19 @@ function richTextToDocx(richText) {
   return children.length ? children : [new TextRun("")];
 }
 
-function plainTextRuns(text, annotations = {}) {
+function plainTextRuns(text, annotations = {}, defaults = {}) {
   const pieces = String(text || "").split(/\r?\n/);
   return pieces.flatMap((piece, index) => {
     const run = new TextRun({
       text: piece,
       break: index ? 1 : undefined,
-      bold: Boolean(annotations.bold),
+      bold: Boolean(annotations.bold || defaults.bold),
       italics: Boolean(annotations.italic),
       strike: Boolean(annotations.strikethrough),
-      color: annotations.linkStyle ? "1E6B8F" : undefined,
+      color: annotations.linkStyle ? "1E6B8F" : defaults.color,
       underline: annotations.linkStyle || annotations.underline ? {} : undefined,
-      font: annotations.code ? "Consolas" : undefined,
+      font: annotations.code ? "Consolas" : defaults.font,
+      size: defaults.size,
       shading: annotations.code ? { type: ShadingType.CLEAR, fill: "EFEDEA" } : undefined
     });
     return [run];

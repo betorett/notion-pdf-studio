@@ -1126,9 +1126,12 @@ th input {
 }
 
 .mermaid-diagram {
-  display: grid;
-  place-items: center;
-  min-height: 210px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  aspect-ratio: 16 / 10;
+  max-height: min(540px, 58vh);
   margin: 14px 0;
   padding: 14px;
   border: 1px solid #e3ddd5;
@@ -1147,7 +1150,8 @@ th input {
 .mermaid-diagram svg {
   width: 100%;
   max-width: 100%;
-  height: auto;
+  height: 100%;
+  max-height: 100%;
 }
 
 .mermaid-diagram.mermaid-error {
@@ -1939,6 +1943,10 @@ th input[type="checkbox"],
   .notion-table-block {
     overflow: visible !important;
     page-break-inside: avoid;
+  }
+
+  .mermaid-diagram {
+    max-height: 190mm;
   }
 
   .notion-table-block tr {

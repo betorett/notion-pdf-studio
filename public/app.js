@@ -1029,6 +1029,10 @@ function paginateBundles(bundles) {
 
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index];
+        if (item.kind === "block" && item.block?.type === "table") {
+          current = paginateTableItem(measureHost, item, current, pages, usableBodyHeight, bundle.title);
+          continue;
+        }
         const measured = measurePreviewItem(measureHost, item);
         const nextMeasured = items[index + 1] ? measurePreviewItem(measureHost, items[index + 1]) : null;
         const shouldKeepWithNext = isSectionStart(item) && nextMeasured;
@@ -1054,6 +1058,73 @@ function paginateBundles(bundles) {
 
   if (current?.items.length) pages.push(current);
   return pages;
+}
+
+function paginateTableItem(measureHost, item, current, pages, usableBodyHeight, title) {
+  const fullMeasured = measurePreviewItem(measureHost, item);
+  if (!current.items.length || current.used + fullMeasured.height <= usableBodyHeight) {
+    current.items.push(item);
+    current.used += fullMeasured.height;
+    return current;
+  }
+
+  pages.push(current);
+  current = newSheet(title);
+  if (fullMeasured.height <= usableBodyHeight) {
+    current.items.push(item);
+    current.used += fullMeasured.height;
+    return current;
+  }
+
+  const chunks = splitTableByMeasuredRows(measureHost, item, usableBodyHeight);
+  for (const chunk of chunks) {
+    const measured = measurePreviewItem(measureHost, chunk);
+    if (current.items.length && current.used + measured.height > usableBodyHeight) {
+      pages.push(current);
+      current = newSheet(title);
+    }
+    current.items.push(chunk);
+    current.used += measured.height;
+  }
+  return current;
+}
+
+function splitTableByMeasuredRows(measureHost, item, maxHeight) {
+  const block = item.block;
+  const rows = block.children || [];
+  if (rows.length <= 1) return [item];
+  const hasHeader = Boolean(block.table?.has_column_header);
+  const header = hasHeader ? rows[0] : null;
+  const bodyRows = hasHeader ? rows.slice(1) : rows;
+  const chunks = [];
+  let currentRows = [];
+
+  for (const row of bodyRows) {
+    const candidateRows = [...currentRows, row];
+    const candidate = tableItemWithRows(item, header ? [header, ...candidateRows] : candidateRows, chunks.length);
+    const measured = measurePreviewItem(measureHost, candidate);
+    if (currentRows.length && measured.height > maxHeight) {
+      chunks.push(tableItemWithRows(item, header ? [header, ...currentRows] : currentRows, chunks.length));
+      currentRows = [row];
+    } else {
+      currentRows = candidateRows;
+    }
+  }
+  if (currentRows.length) {
+    chunks.push(tableItemWithRows(item, header ? [header, ...currentRows] : currentRows, chunks.length));
+  }
+  return chunks.length ? chunks : [item];
+}
+
+function tableItemWithRows(item, rows, index) {
+  return {
+    ...item,
+    block: {
+      ...item.block,
+      id: `${item.block.id || "table"}-page-${index}`,
+      children: rows
+    }
+  };
 }
 
 function buildBundleItems(bundle) {
@@ -1122,7 +1193,7 @@ function flattenBlocks(blocks, depth = 0) {
   for (const block of blocks) {
     if (block.type === "numbered_list_item") numberedIndex += 1;
     else numberedIndex = 0;
-    const splitBlocks = block.type === "table" ? splitTableBlock(block) : splitLongTextBlock(block);
+    const splitBlocks = splitLongTextBlock(block);
     splitBlocks.forEach((part, partIndex) => {
       out.push({
         ...part,
@@ -1143,33 +1214,6 @@ function deepBlocks(blocks) {
     block,
     ...deepBlocks(block.children || [])
   ]);
-}
-
-function splitTableBlock(block) {
-  const rows = block.children || [];
-  if (rows.length <= 4) return [block];
-  const hasHeader = Boolean(block.table?.has_column_header);
-  const header = hasHeader ? rows[0] : null;
-  const bodyRows = hasHeader ? rows.slice(1) : rows;
-  const chunks = [];
-  let current = [];
-  let currentWeight = 0;
-  for (const row of bodyRows) {
-    const rowWeight = Math.max(1, Math.ceil(blockPlainText(row).length / 90));
-    if (current.length && (current.length >= 2 || currentWeight + rowWeight > 3)) {
-      chunks.push(current);
-      current = [];
-      currentWeight = 0;
-    }
-    current.push(row);
-    currentWeight += rowWeight;
-  }
-  if (current.length) chunks.push(current);
-  return chunks.map((chunkRows, index) => ({
-    ...block,
-    id: `${block.id || "table"}-part-${index}`,
-    children: header ? [header, ...chunkRows] : chunkRows
-  }));
 }
 
 function splitLongTextBlock(block) {
@@ -1665,6 +1709,7 @@ async function renderMermaidDiagrams(root, scope) {
       const id = `mermaid-${scope}-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
       const result = await window.mermaid.render(id, source);
       node.innerHTML = result.svg;
+      fitMermaidSvg(node);
       node.dataset.rendered = "true";
     } catch (error) {
       node.classList.add("mermaid-error");
@@ -1827,10 +1872,54 @@ function cloneSvgForExport(svg) {
   const height = Math.ceil(Number(svg.getAttribute("height")) || box?.height || svg.getBoundingClientRect().height || 520);
   clone.setAttribute("width", width);
   clone.setAttribute("height", height);
+  inlineSvgComputedStyles(svg, clone);
   clone.querySelectorAll("style").forEach((style) => {
     style.textContent = style.textContent.replace(/@import[^;]+;/g, "");
   });
   return clone;
+}
+
+function fitMermaidSvg(container) {
+  const svg = container.querySelector("svg");
+  if (!svg) return;
+  const box = svg.viewBox?.baseVal;
+  const width = Number(svg.getAttribute("width")) || box?.width || svg.getBoundingClientRect().width || 900;
+  const height = Number(svg.getAttribute("height")) || box?.height || svg.getBoundingClientRect().height || 520;
+  if (!svg.getAttribute("viewBox")) svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  container.style.aspectRatio = `${width} / ${height}`;
+}
+
+function inlineSvgComputedStyles(sourceSvg, targetSvg) {
+  const sourceNodes = [sourceSvg, ...sourceSvg.querySelectorAll("*")];
+  const targetNodes = [targetSvg, ...targetSvg.querySelectorAll("*")];
+  const props = [
+    "fill",
+    "stroke",
+    "color",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "text-anchor",
+    "dominant-baseline",
+    "opacity",
+    "stroke-width",
+    "stroke-dasharray",
+    "stroke-linecap",
+    "stroke-linejoin"
+  ];
+  sourceNodes.forEach((sourceNode, index) => {
+    const targetNode = targetNodes[index];
+    if (!targetNode || !(sourceNode instanceof Element)) return;
+    const computed = window.getComputedStyle(sourceNode);
+    const style = props
+      .map((prop) => `${prop}:${computed.getPropertyValue(prop)}`)
+      .join(";");
+    targetNode.setAttribute("style", `${targetNode.getAttribute("style") || ""};${style}`);
+  });
 }
 
 function base64Utf8(value) {
