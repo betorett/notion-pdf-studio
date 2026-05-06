@@ -27,6 +27,7 @@
 
 html,
 body {
+  height: 100%;
   min-height: 100%;
 }
 
@@ -67,7 +68,8 @@ button {
 .shell {
   display: grid;
   grid-template-columns: clamp(248px, 15vw, 286px) minmax(0, 1fr) clamp(360px, 31vw, 520px);
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   background: rgba(252, 251, 248, 0.74);
   transition: grid-template-columns 180ms ease;
 }
@@ -93,10 +95,12 @@ body.sidebar-collapsed .shell {
 
 .preview-panel {
   border-width: 0 0 0 1px;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  max-height: 100vh;
+  min-height: 0;
+  height: 100dvh;
 }
 
 .brand {
@@ -382,8 +386,9 @@ select:focus {
 
 .workspace {
   min-width: 0;
+  min-height: 0;
   padding: 26px;
-  overflow: hidden;
+  overflow: auto;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 14px;
@@ -907,12 +912,20 @@ th input {
   font-weight: 700;
 }
 
-.block.heading_3,
-.block.heading_4 {
+.block.heading_3 {
   margin-top: 14px;
   font-size: 16px;
   line-height: 1.35;
   font-weight: 700;
+}
+
+.block.heading_4 {
+  margin-top: 12px;
+  color: #37352f;
+  font-family: var(--font);
+  font-size: 14.5px;
+  line-height: 1.42;
+  font-weight: 650;
 }
 
 .block.paragraph {
@@ -1038,6 +1051,8 @@ th input {
 .notion-table-block {
   width: 100%;
   overflow: auto;
+  break-inside: avoid;
+  page-break-inside: avoid;
   border: 1px solid #ded9d1;
   border-radius: 0;
   margin: 12px 0 14px;
@@ -1057,6 +1072,11 @@ th input {
   border-right: 1px solid #e8e3dc;
   border-bottom: 1px solid #e8e3dc;
   background: #fff;
+}
+
+.notion-table-block tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .notion-table-block th {
@@ -1606,7 +1626,7 @@ th input[type="checkbox"],
 
 .preview-canvas {
   flex: 1 1 auto;
-  padding: 28px 28px 34px;
+  padding: 28px 28px 152px;
   background:
     linear-gradient(180deg, rgba(250, 249, 247, 0.94), rgba(238, 236, 232, 0.94)),
     radial-gradient(circle at 50% 0, rgba(13, 123, 117, 0.08), transparent 30%);
@@ -1615,12 +1635,18 @@ th input[type="checkbox"],
 .ready-export-card {
   display: grid;
   gap: 10px;
-  margin: 16px 24px 24px;
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  left: 24px;
+  z-index: 20;
+  margin: 0;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 18px 44px rgba(31, 29, 25, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 26px 70px rgba(31, 29, 25, 0.16);
+  backdrop-filter: blur(16px);
 }
 
 .ready-card-top {
@@ -1744,11 +1770,12 @@ th input[type="checkbox"],
   .preview-panel {
     grid-column: 1 / -1;
     border-width: 1px 0 0;
-    max-height: 72vh;
+    height: min(72dvh, 720px);
+    max-height: none;
   }
 
   .workspace {
-    min-height: 640px;
+    min-height: 0;
   }
 }
 
@@ -1776,6 +1803,8 @@ th input[type="checkbox"],
   .workspace,
   .preview-panel {
     max-height: none;
+    height: auto;
+    min-height: 560px;
   }
 
   .sidebar {
@@ -1836,6 +1865,18 @@ th input[type="checkbox"],
     width: 100%;
   }
 
+  .ready-export-card {
+    position: sticky;
+    right: auto;
+    bottom: 12px;
+    left: auto;
+    margin: 14px 16px 16px;
+  }
+
+  .preview-canvas {
+    padding-bottom: 28px;
+  }
+
   .toggles {
     grid-template-columns: 1fr;
   }
@@ -1892,6 +1933,16 @@ th input[type="checkbox"],
   .block.code,
   .block.equation,
   .mermaid-diagram {
+    break-inside: avoid;
+  }
+
+  .notion-table-block {
+    overflow: visible !important;
+    page-break-inside: avoid;
+  }
+
+  .notion-table-block tr {
+    page-break-inside: avoid;
     break-inside: avoid;
   }
 

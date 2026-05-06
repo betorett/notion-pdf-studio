@@ -12,7 +12,6 @@ const {
   ExternalHyperlink,
   Footer,
   Header,
-  HeadingLevel,
   ImageRun,
   LevelFormat,
   Packer,
@@ -37,6 +36,10 @@ const { convertToXmlComponent } = require("docx");
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const MERMAID_BROWSER_BUNDLE = require.resolve("mermaid/dist/mermaid.min.js");
+const TRANSPARENT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "base64"
+);
 const DATA_DIR = path.join(ROOT, "data");
 const STATE_FILE = path.join(DATA_DIR, "local-state.json");
 const PORT = Number(process.env.PORT || 4173);
@@ -778,6 +781,7 @@ async function fetchBlockChildren(token, blockId, depth = 0, seen = new Set()) {
 async function summarizePage(page, schema = {}, token = "", relationTitleCache = new Map()) {
   const properties = {};
   for (const [name, value] of Object.entries(page.properties || {})) {
+    if (value?.type === "title") continue;
     properties[name] = await propertyToPlain(value, token, relationTitleCache);
   }
   return {
@@ -1037,12 +1041,16 @@ async function createDocxBuffer({ bundles, settings, hiddenProperties, mermaidAs
     styles: {
       default: {
         document: {
-          run: { font: "Arial", size: 22, color: "25231F" },
+          run: { font: "Segoe UI", size: 22, color: "25231F" },
           paragraph: { alignment: AlignmentType.JUSTIFIED, spacing: { after: 120 } }
         }
       },
       paragraphStyles: [
-        { id: "NotionTitle", name: "Notion Title", basedOn: "Normal", next: "Normal", quickFormat: true, run: { size: 44, bold: true, color: "25231F" }, paragraph: { spacing: { before: 120, after: 220 } } },
+        { id: "NotionTitle", name: "Notion Title", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 44, bold: true, color: "25231F" }, paragraph: { spacing: { before: 120, after: 220 } } },
+        { id: "NotionHeading1", name: "Notion Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 34, bold: true, color: "25231F" }, paragraph: { spacing: { before: 260, after: 120 }, keepNext: true } },
+        { id: "NotionHeading2", name: "Notion Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 28, bold: true, color: "25231F" }, paragraph: { spacing: { before: 220, after: 100 }, keepNext: true } },
+        { id: "NotionHeading3", name: "Notion Heading 3", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 24, bold: true, color: "25231F" }, paragraph: { spacing: { before: 180, after: 80 }, keepNext: true } },
+        { id: "NotionHeading4", name: "Notion Heading 4", basedOn: "Normal", next: "Normal", quickFormat: true, run: { font: "Segoe UI", size: 22, bold: true, color: "37352F" }, paragraph: { spacing: { before: 140, after: 60 }, keepNext: true } },
         { id: "NotionCode", name: "Notion Code", basedOn: "Normal", run: { font: "Consolas", size: 19, color: "25231F" }, paragraph: { shading: { type: ShadingType.CLEAR, fill: "F4F3F0" }, spacing: { before: 80, after: 140 } } }
       ]
     },
@@ -1131,7 +1139,7 @@ async function bundleToDocxChildren(bundle, context) {
     })
   ];
   if (context.settings.showProperties) {
-    children.push(...propertiesToDocx(bundle.properties || {}, context.hidden));
+    children.push(...propertiesToDocx(bundle.properties || {}, context.hidden, bundle.title || ""));
   }
   for (const block of flattenNotionBlocks(bundle.blocks || [])) {
     children.push(...await blockToDocx(block, context));
@@ -1139,9 +1147,9 @@ async function bundleToDocxChildren(bundle, context) {
   return children;
 }
 
-function propertiesToDocx(properties, hidden) {
+function propertiesToDocx(properties, hidden, pageTitle = "") {
   const rows = Object.entries(properties)
-    .filter(([name, value]) => name !== "Name" && !hidden.has(name) && value !== "" && value != null)
+    .filter(([name, value]) => !isTitleProperty(name, value, pageTitle) && !hidden.has(name) && value !== "" && value != null)
     .slice(0, 14)
     .map(([name, value]) => new TableRow({
       children: [
@@ -1196,11 +1204,11 @@ async function blockToDocx(block, context) {
   const type = block.type || "unsupported";
   const indent = { left: Math.min(Number(block.depth || 0) * 360, 1440) };
   if (["heading_1", "heading_2", "heading_3"].includes(type)) {
-    const heading = type === "heading_1" ? HeadingLevel.HEADING_1 : type === "heading_2" ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
-    return [new Paragraph({ heading, indent, children: richTextToDocx(block[type]?.rich_text || []) })];
+    const style = type === "heading_1" ? "NotionHeading1" : type === "heading_2" ? "NotionHeading2" : "NotionHeading3";
+    return [new Paragraph({ style, indent, children: richTextToDocx(block[type]?.rich_text || []) })];
   }
   if (type === "heading_4") {
-    return [new Paragraph({ indent, children: [new TextRun({ text: richTextToPlain(block.heading_4?.rich_text || []), bold: true, size: 24 })] })];
+    return [new Paragraph({ style: "NotionHeading4", indent, children: richTextToDocx(block.heading_4?.rich_text || []) })];
   }
   if (type === "paragraph") {
     return [new Paragraph({ indent, alignment: AlignmentType.JUSTIFIED, children: richTextToDocx(block.paragraph?.rich_text || []) || [new TextRun("")] })];
@@ -1269,11 +1277,7 @@ function codeBlockToDocx(block, context, indent) {
         return [new Paragraph({
           indent,
           alignment: AlignmentType.CENTER,
-          children: [new ImageRun({
-            data: image.data,
-            type: image.type,
-            transformation: imageDimensions(asset.width, asset.height, 520, 320)
-          })]
+          children: [imageRunFromAsset(image, asset, 520, 320)]
         })];
       }
     }
@@ -1574,13 +1578,41 @@ function propertyValueText(value) {
   return String(value ?? "");
 }
 
+function isTitleProperty(name, value, pageTitle = "") {
+  const normalizedName = String(name || "").trim().toLowerCase();
+  if (["name", "title", "título", "títol", "nom"].includes(normalizedName)) return true;
+  const normalizedValue = propertyValueText(value).trim().toLowerCase();
+  return Boolean(pageTitle && normalizedValue && normalizedValue === String(pageTitle).trim().toLowerCase());
+}
+
 function dataUrlToImage(dataUrl) {
-  const match = String(dataUrl || "").match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/);
+  const match = String(dataUrl || "").match(/^data:image\/(png|jpeg|jpg|svg\+xml);base64,(.+)$/);
   if (!match) return null;
   return {
-    type: match[1] === "png" ? "png" : "jpg",
+    type: match[1] === "png" ? "png" : match[1] === "svg+xml" ? "svg" : "jpg",
     data: Buffer.from(match[2], "base64")
   };
+}
+
+function imageRunFromAsset(image, asset, maxWidth, maxHeight) {
+  const transformation = imageDimensions(asset.width, asset.height, maxWidth, maxHeight);
+  if (image.type === "svg") {
+    return new ImageRun({
+      data: image.data,
+      type: "svg",
+      transformation,
+      fallback: {
+        data: TRANSPARENT_PNG,
+        type: "png",
+        transformation
+      }
+    });
+  }
+  return new ImageRun({
+    data: image.data,
+    type: image.type,
+    transformation
+  });
 }
 
 function imageDimensions(width, height, maxWidth, maxHeight) {

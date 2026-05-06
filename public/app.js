@@ -444,7 +444,9 @@ async function exportWord({ googleDocs = false } = {}) {
       settings: state.settings,
       hiddenProperties: state.dbSettings.hiddenProperties || [],
       mermaidAssets,
-      sourceName: state.source?.name || state.bundles[0]?.title || "Notion export"
+      sourceName: state.bundles.length === 1
+        ? state.bundles[0]?.title || "Notion export"
+        : state.source?.name || state.bundles[0]?.title || "Notion export"
     });
     downloadBlob(response.blob, response.filename);
     if (googleDocs) {
@@ -1145,20 +1147,29 @@ function deepBlocks(blocks) {
 
 function splitTableBlock(block) {
   const rows = block.children || [];
-  if (rows.length <= 6) return [block];
+  if (rows.length <= 4) return [block];
   const hasHeader = Boolean(block.table?.has_column_header);
   const header = hasHeader ? rows[0] : null;
   const bodyRows = hasHeader ? rows.slice(1) : rows;
   const chunks = [];
-  for (let i = 0; i < bodyRows.length; i += 5) {
-    const chunkRows = bodyRows.slice(i, i + 5);
-    chunks.push({
-      ...block,
-      id: `${block.id || "table"}-part-${chunks.length}`,
-      children: header ? [header, ...chunkRows] : chunkRows
-    });
+  let current = [];
+  let currentWeight = 0;
+  for (const row of bodyRows) {
+    const rowWeight = Math.max(1, Math.ceil(blockPlainText(row).length / 90));
+    if (current.length && (current.length >= 2 || currentWeight + rowWeight > 3)) {
+      chunks.push(current);
+      current = [];
+      currentWeight = 0;
+    }
+    current.push(row);
+    currentWeight += rowWeight;
   }
-  return chunks;
+  if (current.length) chunks.push(current);
+  return chunks.map((chunkRows, index) => ({
+    ...block,
+    id: `${block.id || "table"}-part-${index}`,
+    children: header ? [header, ...chunkRows] : chunkRows
+  }));
 }
 
 function splitLongTextBlock(block) {
@@ -1292,18 +1303,25 @@ function renderPreviewItem(item) {
     return `<h1 class="notion-page-title">${escapeHtml(item.bundle.title)}</h1>`;
   }
   if (item.kind === "properties") {
-    return renderProperties(item.bundle.properties || {});
+    return renderProperties(item.bundle.properties || {}, item.bundle.title);
   }
   return renderBlock(item.block);
 }
 
-function renderProperties(properties) {
-  const entries = Object.entries(properties).filter(([name, value]) => name !== "Name" && !isPropertyHidden(name) && value !== "" && value != null);
+function renderProperties(properties, pageTitle = "") {
+  const entries = Object.entries(properties).filter(([name, value]) => !isTitleProperty(name, value, pageTitle) && !isPropertyHidden(name) && value !== "" && value != null);
   if (!entries.length) return "";
   return `<dl class="notion-props">${entries
     .slice(0, 10)
     .map(([name, value]) => `<dt>${escapeHtml(name)}</dt><dd>${propertyCell(value)}</dd>`)
     .join("")}</dl>`;
+}
+
+function isTitleProperty(name, value, pageTitle = "") {
+  const normalizedName = String(name || "").trim().toLowerCase();
+  if (["name", "title", "título", "títol", "nom"].includes(normalizedName)) return true;
+  const normalizedValue = propertyText(value).trim().toLowerCase();
+  return Boolean(pageTitle && normalizedValue && normalizedValue === String(pageTitle).trim().toLowerCase());
 }
 
 function renderBlock(block) {
@@ -1665,7 +1683,7 @@ async function collectMermaidAssets() {
     try {
       rememberMermaidAsset(assets, source, await svgToPngAsset(svg));
     } catch {
-      // The server will fall back to the Mermaid source code.
+      rememberMermaidAsset(assets, source, svgToImageAsset(svg));
     }
   }
   for (const source of mermaidSourcesFromBundles()) {
@@ -1673,7 +1691,11 @@ async function collectMermaidAssets() {
     try {
       rememberMermaidAsset(assets, source, await renderMermaidSourceToPng(source));
     } catch {
-      // The server will fall back to the Mermaid source code.
+      try {
+        rememberMermaidAsset(assets, source, await renderMermaidSourceToSvg(source));
+      } catch {
+        // The server will fall back to the Mermaid source code.
+      }
     }
   }
   return assets;
@@ -1701,6 +1723,24 @@ function mermaidSourcesFromBundles() {
 }
 
 async function renderMermaidSourceToPng(source) {
+  const svg = await renderMermaidSourceToSvgElement(source);
+  try {
+    return await svgToPngAsset(svg);
+  } finally {
+    svg.closest(".mermaid-export-host")?.remove();
+  }
+}
+
+async function renderMermaidSourceToSvg(source) {
+  const svg = await renderMermaidSourceToSvgElement(source);
+  try {
+    return svgToImageAsset(svg);
+  } finally {
+    svg.closest(".mermaid-export-host")?.remove();
+  }
+}
+
+async function renderMermaidSourceToSvgElement(source) {
   await ensureMermaid();
   if (!mermaidReady) {
     window.mermaid.initialize({
@@ -1732,20 +1772,29 @@ async function renderMermaidSourceToPng(source) {
   try {
     const svg = host.querySelector("svg");
     if (!svg) throw new Error("Mermaid no devolvió SVG.");
-    return await svgToPngAsset(svg);
-  } finally {
+    return svg;
+  } catch (error) {
     host.remove();
+    throw error;
   }
 }
 
+function svgToImageAsset(svg) {
+  const clone = cloneSvgForExport(svg);
+  const width = Number(clone.getAttribute("width")) || 900;
+  const height = Number(clone.getAttribute("height")) || 520;
+  const xml = new XMLSerializer().serializeToString(clone);
+  return {
+    data: `data:image/svg+xml;base64,${base64Utf8(xml)}`,
+    width,
+    height
+  };
+}
+
 async function svgToPngAsset(svg) {
-  const clone = svg.cloneNode(true);
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  const box = svg.viewBox?.baseVal;
-  const width = Math.ceil(Number(svg.getAttribute("width")) || box?.width || svg.getBoundingClientRect().width || 900);
-  const height = Math.ceil(Number(svg.getAttribute("height")) || box?.height || svg.getBoundingClientRect().height || 520);
-  clone.setAttribute("width", width);
-  clone.setAttribute("height", height);
+  const clone = cloneSvgForExport(svg);
+  const width = Number(clone.getAttribute("width")) || 900;
+  const height = Number(clone.getAttribute("height")) || 520;
 
   const xml = new XMLSerializer().serializeToString(clone);
   const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
@@ -1768,6 +1817,29 @@ async function svgToPngAsset(svg) {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function cloneSvgForExport(svg) {
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const box = svg.viewBox?.baseVal;
+  const width = Math.ceil(Number(svg.getAttribute("width")) || box?.width || svg.getBoundingClientRect().width || 900);
+  const height = Math.ceil(Number(svg.getAttribute("height")) || box?.height || svg.getBoundingClientRect().height || 520);
+  clone.setAttribute("width", width);
+  clone.setAttribute("height", height);
+  clone.querySelectorAll("style").forEach((style) => {
+    style.textContent = style.textContent.replace(/@import[^;]+;/g, "");
+  });
+  return clone;
+}
+
+function base64Utf8(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
 }
 
 function loadImage(src) {
