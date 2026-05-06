@@ -9,7 +9,7 @@ const MM_TO_PX = 3.78;
 const MAX_PREVIEW_SCALE = 0.56;
 const KATEX_CSS_URL = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css";
 const KATEX_JS_URL = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js";
-const MERMAID_JS_URL = "https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js";
+const MERMAID_JS_URL = "/vendor/mermaid.min.js";
 const TOKEN_STORAGE_KEY = "notionPdfToken";
 
 const state = {
@@ -93,15 +93,11 @@ function bindElements() {
     "syncButton",
     "savedDatabases",
     "saveDbButton",
-    "quickPreviewGuideButton",
     "sourceMode",
     "searchInput",
     "selectAllButton",
     "dbSettingsButton",
     "loadPreviewButton",
-    "exportWordButton",
-    "exportGoogleDocsButton",
-    "exportButton",
     "filterSummary",
     "toggleFiltersButton",
     "applyQueryButton",
@@ -115,7 +111,6 @@ function bindElements() {
     "dbSettingsSummary",
     "propertySettingsList",
     "closeDbSettingsButton",
-    "bulkCheckbox",
     "clearSelectionButton",
     "invertSelectionButton",
     "selectionCount",
@@ -172,13 +167,11 @@ function bindEvents() {
   });
   els.syncButton.addEventListener("click", syncNotion);
   els.saveDbButton.addEventListener("click", saveCurrentDb);
-  els.quickPreviewGuideButton.addEventListener("click", loadPreview);
   els.searchInput.addEventListener("input", () => {
     state.tablePage = 1;
     schedulePagesTable();
   });
   els.selectAllButton.addEventListener("click", toggleSelectAll);
-  els.bulkCheckbox.addEventListener("change", () => toggleCurrentPageSelection(els.bulkCheckbox.checked));
   els.clearSelectionButton.addEventListener("click", clearSelection);
   els.invertSelectionButton.addEventListener("click", invertVisibleSelection);
   els.pageSizeInput.addEventListener("input", () => {
@@ -193,9 +186,6 @@ function bindEvents() {
     els.dbSettingsPanel.classList.add("hidden");
   });
   els.loadPreviewButton.addEventListener("click", loadPreview);
-  els.exportWordButton.addEventListener("click", () => exportWord({ googleDocs: false }));
-  els.exportGoogleDocsButton.addEventListener("click", () => exportWord({ googleDocs: true }));
-  els.exportButton.addEventListener("click", exportPdf);
   els.readyExportButton.addEventListener("click", exportFromReadyCard);
   els.applyQueryButton.addEventListener("click", syncNotion);
   els.addFilterButton.addEventListener("click", () => {
@@ -888,8 +878,6 @@ function renderSelectionMeta() {
   els.pageCount.textContent = visible.length
     ? `${start}-${end} de ${visible.length} página${visible.length === 1 ? "" : "s"}`
     : `0 de ${state.pages.length} página${state.pages.length === 1 ? "" : "s"}`;
-  els.bulkCheckbox.checked = Boolean(currentPageRows.length && currentPageRows.every((page) => state.selected.has(page.id)));
-  els.bulkCheckbox.indeterminate = Boolean(currentPageRows.some((page) => state.selected.has(page.id)) && !els.bulkCheckbox.checked);
   updateReadyExportCard();
 }
 
@@ -1141,11 +1129,18 @@ function flattenBlocks(blocks, depth = 0) {
         continued: partIndex > 0
       });
     });
-    if (block.children?.length && block.type !== "table") {
+    if (block.children?.length && !["table", "column_list", "column"].includes(block.type)) {
       out.push(...flattenBlocks(block.children, depth + 1));
     }
   }
   return out;
+}
+
+function deepBlocks(blocks) {
+  return (blocks || []).flatMap((block) => [
+    block,
+    ...deepBlocks(block.children || [])
+  ]);
 }
 
 function splitTableBlock(block) {
@@ -1236,8 +1231,8 @@ function estimateBlockHeight(block) {
     embed: 72,
     equation: 42,
     toggle: 34,
-    column_list: 20,
-    column: 20,
+    column_list: 80 + Math.max(1, block.children?.length || 1) * 24,
+    column: 80,
     synced_block: 24,
     table_of_contents: 40,
     breadcrumb: 28,
@@ -1347,11 +1342,16 @@ function renderBlock(block) {
     return `<div class="block toggle" ${depthStyle}><span class="toggle-caret">▾</span><div>${richTextToHtml(block.toggle?.rich_text || [])}</div></div>`;
   }
   if (type === "button") {
-    const label = richTextToHtml(block.button?.rich_text || []) || escapeHtml(block.button?.name || "Botón");
-    return `<div class="block notion-button" ${depthStyle}>${label}</div>`;
+    return "";
   }
-  if (type === "column_list") return `<div class="block column-list" ${depthStyle}></div>`;
-  if (type === "column") return `<div class="block column" ${depthStyle}></div>`;
+  if (type === "column_list") {
+    const columns = (block.children || []).filter((child) => child.type === "column");
+    const columnStyle = `style="${block.depth ? `margin-left:${Math.min(block.depth * 22, 88)}px;` : ""}--notion-columns:${Math.max(1, columns.length || 1)}"`;
+    return `<div class="block column-list" ${columnStyle}>${columns.map((column) => renderBlock({ ...column, depth: 0 })).join("")}</div>`;
+  }
+  if (type === "column") {
+    return `<div class="block column">${(block.children || []).map((child) => renderBlock({ ...child, depth: 0 })).join("")}</div>`;
+  }
   if (type === "synced_block") return `<div class="block synced-block" ${depthStyle}>${block.synced_block?.synced_from ? "Sincronizado desde otro bloque" : "Bloque sincronizado"}</div>`;
   if (type === "table_of_contents") return `<div class="block table-of-contents" ${depthStyle}>Índice</div>`;
   if (type === "breadcrumb") return `<div class="block breadcrumb" ${depthStyle}>Ruta de navegación</div>`;
@@ -1408,7 +1408,7 @@ function updatePrintStyle() {
 
 function updateConnection() {
   const mode = state.source?.mode || "local";
-  els.connectionLabel.textContent = state.token ? "Token cargado" : "Sin token";
+  els.connectionLabel.textContent = "";
   els.sourceMode.textContent = state.source ? `${state.source.name} · ${modeLabel(mode)}` : "Vista local";
   renderSavedDatabases();
 }
@@ -1694,7 +1694,7 @@ function normalizeMermaidSource(source) {
 
 function mermaidSourcesFromBundles() {
   return Array.from(new Set(state.bundles
-    .flatMap((bundle) => flattenBlocks(bundle.blocks || []))
+    .flatMap((bundle) => deepBlocks(bundle.blocks || []))
     .filter(isMermaidBlock)
     .map(blockPlainText)
     .filter((source) => source.trim())));
@@ -1856,11 +1856,11 @@ function loadExternalStyle(href) {
 }
 
 function hasMathContent() {
-  return state.bundles.some((bundle) => flattenBlocks(bundle.blocks || []).some((block) => block.type === "equation" || blockHasInlineEquation(block)));
+  return state.bundles.some((bundle) => deepBlocks(bundle.blocks || []).some((block) => block.type === "equation" || blockHasInlineEquation(block)));
 }
 
 function hasMermaidContent() {
-  return state.bundles.some((bundle) => flattenBlocks(bundle.blocks || []).some(isMermaidBlock));
+  return state.bundles.some((bundle) => deepBlocks(bundle.blocks || []).some(isMermaidBlock));
 }
 
 function blockHasInlineEquation(block) {
@@ -1935,7 +1935,7 @@ function formatDate(value) {
 
 function setLoading(loading, message) {
   state.loading = loading;
-  for (const button of [els.syncButton, els.loadPreviewButton, els.exportButton, els.exportWordButton, els.exportGoogleDocsButton, els.saveDbButton, els.readyExportButton]) {
+  for (const button of [els.syncButton, els.loadPreviewButton, els.saveDbButton, els.readyExportButton]) {
     button.disabled = loading;
   }
   updateReadyExportCard();

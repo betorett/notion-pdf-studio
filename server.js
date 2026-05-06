@@ -36,6 +36,7 @@ const { convertToXmlComponent } = require("docx");
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
+const MERMAID_BROWSER_BUNDLE = require.resolve("mermaid/dist/mermaid.min.js");
 const DATA_DIR = path.join(ROOT, "data");
 const STATE_FILE = path.join(DATA_DIR, "local-state.json");
 const PORT = Number(process.env.PORT || 4173);
@@ -1184,7 +1185,7 @@ function flattenNotionBlocks(blocks, depth = 0) {
     if (block.type === "numbered_list_item") numberedIndex += 1;
     else numberedIndex = 0;
     out.push({ ...block, depth, listIndex: numberedIndex || undefined });
-    if (block.children?.length && block.type !== "table") {
+    if (block.children?.length && !["table", "column_list", "column"].includes(block.type)) {
       out.push(...flattenNotionBlocks(block.children, depth + 1));
     }
   }
@@ -1242,6 +1243,9 @@ async function blockToDocx(block, context) {
   if (type === "code") return codeBlockToDocx(block, context, indent);
   if (type === "equation") return [equationParagraph(block.equation?.expression || "", true, indent)];
   if (type === "table") return [tableToDocx(block)];
+  if (type === "column_list") return [await columnListToDocx(block, context)];
+  if (type === "column") return columnToDocxChildren(block, context);
+  if (type === "button") return [];
   if (["image", "video", "audio", "pdf", "file", "bookmark", "embed", "link_preview"].includes(type)) {
     return mediaToDocx(block, indent);
   }
@@ -1353,8 +1357,51 @@ function tableToDocx(block) {
   });
 }
 
+async function columnListToDocx(block, context) {
+  const columns = (block.children || []).filter((child) => child.type === "column");
+  if (!columns.length) {
+    return new Paragraph({ children: [new TextRun("")] });
+  }
+  const width = Math.floor(100 / columns.length);
+  const cells = [];
+  for (const column of columns) {
+    const children = await columnToDocxChildren(column, context);
+    cells.push(new TableCell({
+      width: { size: width, type: WidthType.PERCENTAGE },
+      verticalAlign: VerticalAlign.TOP,
+      margins: {
+        top: 80,
+        bottom: 80,
+        left: 90,
+        right: 90
+      },
+      borders: noTableBorders(),
+      children: children.length ? children : [new Paragraph({ children: [new TextRun("")] })]
+    }));
+  }
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.AUTOFIT,
+    borders: noTableBorders(),
+    rows: [new TableRow({ cantSplit: true, children: cells })]
+  });
+}
+
+async function columnToDocxChildren(column, context) {
+  const children = [];
+  for (const child of column.children || []) {
+    children.push(...await blockToDocx({ ...child, depth: 0 }, context));
+  }
+  return children;
+}
+
 function softTableBorders() {
   const border = { style: BorderStyle.SINGLE, size: 6, color: "D8D1C6" };
+  return { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
+}
+
+function noTableBorders() {
+  const border = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
   return { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
 }
 
@@ -1547,6 +1594,20 @@ function imageDimensions(width, height, maxWidth, maxHeight) {
 }
 
 async function serveStatic(req, res, pathname) {
+  if (pathname === "/vendor/mermaid.min.js") {
+    try {
+      const data = await fs.readFile(MERMAID_BROWSER_BUNDLE);
+      res.writeHead(200, responseHeaders({
+        "Content-Type": MIME_TYPES[".js"],
+        "Content-Length": data.length,
+        "Cache-Control": "public, max-age=604800, immutable"
+      }));
+      res.end(data);
+    } catch {
+      sendJson(res, 404, { error: "Mermaid bundle not found" });
+    }
+    return;
+  }
   const target = pathname === "/" ? "/index.html" : pathname;
   const resolved = path.normalize(path.join(PUBLIC_DIR, target));
   if (!resolved.startsWith(PUBLIC_DIR)) {

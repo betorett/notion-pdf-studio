@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#f4f3f0" />
     <title>Notion PDF Studio</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260505-structure" />
+    <link rel="stylesheet" href="/styles.css?v=20260506-cleanup" />
   </head>
   <body>
     <div id="app" class="shell">
@@ -16,27 +16,32 @@
           <div class="brand-mark" aria-hidden="true">N</div>
           <div>
             <strong>Notion PDF Studio</strong>
-            <span id="connectionLabel">Sin token</span>
+            <span id="connectionLabel" class="connection-state" aria-live="polite"></span>
           </div>
           <button id="collapseSidebarButton" class="icon-button modern-toggle sidebar-toggle" type="button" title="Ocultar panel lateral" aria-label="Ocultar panel lateral">
             <span class="chevron-icon left" aria-hidden="true"></span>
           </button>
         </div>
 
-        <section class="side-section">
-          <div class="section-title">Conexión</div>
-          <label class="field">
-            <span>Token de Notion</span>
-            <input id="tokenInput" type="password" autocomplete="off" placeholder="secret_..." />
-          </label>
-          <label class="field">
-            <span>Base de datos o data source</span>
-            <input id="sourceInput" type="text" placeholder="ID o URL de Notion" />
-          </label>
-          <div class="button-row">
-            <button id="syncButton" class="button primary" type="button">Sincronizar</button>
+        <details class="side-section connection-details">
+          <summary>
+            <span>Conexión</span>
+            <span class="summary-hint">Token y origen</span>
+          </summary>
+          <div class="connection-body">
+            <label class="field">
+              <span>Token de Notion</span>
+              <input id="tokenInput" type="password" autocomplete="off" placeholder="secret_..." />
+            </label>
+            <label class="field">
+              <span>Base de datos o data source</span>
+              <input id="sourceInput" type="text" placeholder="ID o URL de Notion" />
+            </label>
+            <div class="button-row">
+              <button id="syncButton" class="button primary" type="button">Sincronizar</button>
+            </div>
           </div>
-        </section>
+        </details>
 
         <section class="side-section saved-db-section">
           <div class="section-title section-title-row">
@@ -47,13 +52,6 @@
           </div>
           <div id="savedDatabases" class="saved-list"></div>
           <button id="dbSettingsButton" class="button full soft" type="button">Ajustes de propiedades</button>
-        </section>
-
-        <section class="side-export-card" aria-label="Exportaciones profesionales">
-          <div class="side-export-icon" aria-hidden="true">✓</div>
-          <strong>Exportaciones profesionales</strong>
-          <p>Exporta a PDF, Word y Google Docs con estilo, márgenes y propiedades personalizadas.</p>
-          <button class="button full" type="button" id="quickPreviewGuideButton">Preparar vista previa</button>
         </section>
       </aside>
 
@@ -70,11 +68,6 @@
             </label>
             <button id="selectAllButton" class="button" type="button">Seleccionar</button>
             <button id="loadPreviewButton" class="button strong" type="button">Vista previa</button>
-            <div class="export-group" aria-label="Exportación">
-              <button id="exportButton" class="button primary" type="button">Exportar PDF</button>
-              <button id="exportWordButton" class="button" type="button">Word</button>
-              <button id="exportGoogleDocsButton" class="button" type="button">Google Docs</button>
-            </div>
           </div>
         </header>
 
@@ -120,7 +113,6 @@
         <section class="table-wrap" aria-label="Tabla de páginas">
           <div class="table-meta">
             <div class="selection-meta">
-              <input id="bulkCheckbox" type="checkbox" aria-label="Seleccionar páginas visibles" />
               <span id="selectionCount">0 seleccionadas</span>
             </div>
             <div class="table-actions">
@@ -158,18 +150,13 @@
             <h2>Saltos de página</h2>
           </div>
           <div class="preview-actions">
-            <button id="togglePreviewSettingsButton" class="icon-button modern-toggle" type="button" title="Ocultar ajustes de vista previa" aria-label="Ocultar ajustes de vista previa">
-              <span class="chevron-icon up" aria-hidden="true"></span>
+            <button id="togglePreviewSettingsButton" class="button preview-settings-button" type="button" title="Ocultar ajustes de vista previa" aria-label="Ocultar ajustes de vista previa">
+              <span class="sliders-icon" aria-hidden="true"></span>
+              Ajustes
             </button>
             <span id="sheetCount" class="pill">0 hojas</span>
           </div>
         </div>
-
-        <nav class="preview-tabs" aria-label="Formatos de vista previa">
-          <span class="active">Vista previa</span>
-          <span>PDF</span>
-          <span>Word</span>
-        </nav>
 
         <section id="previewSettingsPanel" class="settings">
           <div class="setting-grid">
@@ -245,6 +232,6 @@
 
     <div id="printDocument" aria-hidden="true"></div>
     <style id="printStyle"></style>
-    <script src="/app.js" defer></script>
+    <script src="/app.js?v=20260506-cleanup2" defer></script>
   </body>
 </html>
