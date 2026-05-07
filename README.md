@@ -16,6 +16,22 @@ El puerto se puede cambiar con `.env` o variable de entorno:
 PORT=4173
 ```
 
+## Instalador Windows
+
+Genera un instalador ligero de escritorio con Node embebido y apertura en Chrome/Edge como app:
+
+```powershell
+npm run dist:win
+```
+
+El instalador autocontenido queda en:
+
+```text
+dist\NotionPDFStudio-Setup.ps1
+```
+
+Instala por usuario en `%LOCALAPPDATA%\Programs\Notion PDF Studio`, crea acceso directo en Escritorio y Menu Inicio, registra desinstalador y no requiere Node.js instalado en el equipo final.
+
 ## Conectar Notion
 
 1. Crea una integracion interna en Notion y copia el token.

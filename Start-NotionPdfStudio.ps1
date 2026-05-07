@@ -7,6 +7,8 @@ $ServerScript = Join-Path $AppRoot "server.js"
 $OutLogPath = Join-Path $AppRoot "notion-pdf-studio.out.log"
 $ErrLogPath = Join-Path $AppRoot "notion-pdf-studio.err.log"
 $BrowserProfile = Join-Path $env:LOCALAPPDATA "NotionPdfStudio\BrowserProfile"
+$BundledNode = Join-Path $AppRoot "runtime\node.exe"
+$NodeExe = if (Test-Path $BundledNode) { $BundledNode } else { (Get-Command node -ErrorAction SilentlyContinue).Source }
 
 function Show-AppError {
   param([string]$Message)
@@ -88,8 +90,8 @@ function Test-BrowserOpen {
 
 Set-Location $AppRoot
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Show-AppError "No encuentro Node.js en este equipo. Instala Node.js 20 o superior y vuelve a abrir Notion PDF Studio."
+if (-not $NodeExe) {
+  Show-AppError "No encuentro el runtime de Notion PDF Studio. Reinstala la aplicación y vuelve a abrirla."
   exit 1
 }
 
@@ -105,7 +107,7 @@ if ($serverProcess) {
   }
 }
 
-$serverProcess = Start-Process -FilePath "node" `
+$serverProcess = Start-Process -FilePath $NodeExe `
   -ArgumentList "`"$ServerScript`"" `
   -WorkingDirectory $AppRoot `
   -WindowStyle Hidden `
