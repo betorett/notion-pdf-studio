@@ -1330,9 +1330,9 @@ function codeBlockToDocx(block, context, indent) {
 }
 
 function equationParagraph(expression, display, indent) {
-  const math = latexToOmmlComponent(expression) || latexTextToOmmlComponent(expression);
+  const math = latexToOmmlComponent(expression, { display }) || latexTextToOmmlComponent(expression, { display });
   if (math) {
-    return new Paragraph({ indent, alignment: display ? AlignmentType.CENTER : undefined, children: [math] });
+    return new Paragraph({ indent, children: [math] });
   }
   return new Paragraph({
     indent,
@@ -1352,13 +1352,13 @@ function normalizeMermaidSource(source) {
   return String(source || "").replace(/\r\n/g, "\n").replace(/\s+$/g, "").trim();
 }
 
-function latexToOmmlComponent(expression) {
+function latexToOmmlComponent(expression, options = {}) {
   const source = normalizeLatexExpression(expression);
   if (!source) return null;
   try {
     const mathmlHtml = katex.renderToString(source, {
       output: "mathml",
-      displayMode: true,
+      displayMode: Boolean(options.display),
       throwOnError: false,
       strict: "ignore"
     });
@@ -1367,7 +1367,7 @@ function latexToOmmlComponent(expression) {
     if (!mathml) return null;
     const omml = mml2omml(mathml)
       .replace(/\s*m:val="undefined"/g, "");
-    return xmlToDocxComponent(omml);
+    return xmlToDocxComponent(options.display ? ommlAsDisplayParagraph(omml) : omml);
   } catch {
     return null;
   }
@@ -1385,12 +1385,17 @@ function normalizeLatexExpression(expression) {
     .trim();
 }
 
-function latexTextToOmmlComponent(expression) {
+function latexTextToOmmlComponent(expression, options = {}) {
   const source = normalizeLatexExpression(expression);
   if (!source) return null;
-  return xmlToDocxComponent(
-    `<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>${escapeXml(source)}</m:t></m:r></m:oMath>`
-  );
+  const omml = `<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>${escapeXml(source)}</m:t></m:r></m:oMath>`;
+  return xmlToDocxComponent(options.display ? ommlAsDisplayParagraph(omml) : omml);
+}
+
+function ommlAsDisplayParagraph(omml) {
+  const value = String(omml || "").trim();
+  if (!value || /^<m:oMathPara[\s>]/.test(value)) return value;
+  return `<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr>${value}</m:oMathPara>`;
 }
 
 function escapeXml(value) {
@@ -1598,7 +1603,7 @@ function richTextToDocx(richText, defaults = {}) {
   const children = [];
   for (const part of richText || []) {
     if (part.type === "equation") {
-      const math = latexToOmmlComponent(part.equation?.expression || part.plain_text || "") || latexTextToOmmlComponent(part.equation?.expression || part.plain_text || "");
+      const math = latexToOmmlComponent(part.equation?.expression || part.plain_text || "", { display: false }) || latexTextToOmmlComponent(part.equation?.expression || part.plain_text || "", { display: false });
       children.push(math || new TextRun({ text: part.equation?.expression || part.plain_text || "", font: "Consolas" }));
       continue;
     }
