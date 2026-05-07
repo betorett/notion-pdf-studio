@@ -1054,25 +1054,29 @@ th input {
   break-inside: avoid;
   page-break-inside: avoid;
   zoom: var(--table-fit, 1);
-  border: 1px solid #ded9d1;
+  border: 1px solid rgba(55, 53, 47, 0.16);
   border-radius: 0;
-  margin: 12px 0 14px;
-  background: #fff;
+  margin: 10px 0 12px;
+  background: transparent;
 }
 
 .notion-table-block table {
+  width: 100%;
   table-layout: auto;
   border-collapse: collapse;
+  background: #fff;
 }
 
 .notion-table-block td,
 .notion-table-block th {
   white-space: normal;
   font-size: 12px;
-  padding: 6px 8px;
-  border-right: 1px solid #e8e3dc;
-  border-bottom: 1px solid #e8e3dc;
+  line-height: 1.45;
+  padding: 7px 8px;
+  border-right: 1px solid rgba(55, 53, 47, 0.16);
+  border-bottom: 1px solid rgba(55, 53, 47, 0.16);
   background: #fff;
+  color: #37352f;
 }
 
 .notion-table-block tr {
@@ -1081,7 +1085,7 @@ th input {
 }
 
 .notion-table-block th {
-  color: #56524c;
+  color: #37352f;
   font-weight: 600;
 }
 
@@ -1107,9 +1111,9 @@ th input {
 }
 
 .block.equation {
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #faf9f7;
+  padding: 6px 0;
+  border-radius: 0;
+  background: transparent;
   font-family: Georgia, "Times New Roman", serif;
   text-align: center;
   overflow-x: auto;
@@ -1117,9 +1121,9 @@ th input {
 
 .rich-equation {
   font-family: Georgia, "Times New Roman", serif;
-  padding: 0.06em 0.2em;
-  border-radius: 4px;
-  background: #faf9f7;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .math-fallback {

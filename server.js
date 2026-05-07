@@ -1469,7 +1469,7 @@ async function columnToDocxChildren(column, context) {
 }
 
 function softTableBorders() {
-  const border = { style: BorderStyle.SINGLE, size: 6, color: "D8D1C6" };
+  const border = { style: BorderStyle.SINGLE, size: 4, color: "E3E2DE" };
   return { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
 }
 
@@ -1488,10 +1488,7 @@ function docxTableCellMargins() {
 }
 
 function docxTableShading(block, rowIndex) {
-  if (rowIndex === 0 && block.table?.has_column_header) {
-    return { type: ShadingType.CLEAR, fill: "EFEDEA" };
-  }
-  return rowIndex % 2 === 0 ? { type: ShadingType.CLEAR, fill: "FBFAF8" } : undefined;
+  return undefined;
 }
 
 function docxTableCellParagraph(cell, header = false) {
