@@ -45,6 +45,8 @@ const STATE_FILE = path.join(DATA_DIR, "local-state.json");
 const PORT = Number(process.env.PORT || 4173);
 const NOTION_VERSION = "2026-03-11";
 const LEGACY_NOTION_VERSION = "2022-06-28";
+const NOTION_FETCH_TIMEOUT_MS = 25_000;
+const NOTION_PAGE_BUNDLE_TIMEOUT_MS = 55_000;
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -496,15 +498,28 @@ function normalizeNotionId(input) {
 
 async function notionFetch(token, endpoint, options = {}) {
   if (!token) throw httpError(401, "Missing Notion token. Paste one in the app or set NOTION_TOKEN in .env.");
-  const response = await fetch(`https://api.notion.com/v1${endpoint}`, {
-    method: options.method || "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Notion-Version": options.version || NOTION_VERSION
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs || NOTION_FETCH_TIMEOUT_MS));
+  let response;
+  try {
+    response = await fetch(`https://api.notion.com/v1${endpoint}`, {
+      method: options.method || "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Notion-Version": options.version || NOTION_VERSION
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw httpError(504, "Notion tarda demasiado en responder. Vuelve a intentarlo o selecciona menos páginas.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await response.text();
   const payload = text ? safeJson(text) : {};
   if (!response.ok) {
@@ -749,12 +764,36 @@ function normalizeSorts(sorts = []) {
 async function fetchPageBundle(token, id) {
   if (demoBundles[id]) return demoBundles[id];
   const pageId = normalizeNotionId(id);
-  const page = await notionFetch(token, `/pages/${pageId}`);
-  const blocks = await fetchBlockChildren(token, pageId);
-  return {
-    ...(await summarizePage(page, {}, token)),
-    blocks
-  };
+  return withTimeout((async () => {
+    const page = await notionFetch(token, `/pages/${pageId}`);
+    const blocks = await fetchBlockChildren(token, pageId);
+    return {
+      ...(await summarizePage(page, {}, token)),
+      blocks
+    };
+  })(), NOTION_PAGE_BUNDLE_TIMEOUT_MS, `La página ${pageId} tarda demasiado en descargar sus bloques.`);
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeout;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(httpError(504, message)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function fetchBlockChildren(token, blockId, depth = 0, seen = new Set()) {
@@ -1741,10 +1780,7 @@ async function handleApi(req, res, pathname) {
 
   if (method === "POST" && pathname === "/api/notion/pages") {
     const pageIds = Array.isArray(body.pageIds) ? body.pageIds.slice(0, 50) : [];
-    const pages = [];
-    for (const pageId of pageIds) {
-      pages.push(await fetchPageBundle(token, pageId));
-    }
+    const pages = await mapWithConcurrency(pageIds, 3, (pageId) => fetchPageBundle(token, pageId));
     sendJson(res, 200, { pages });
     return;
   }
@@ -1870,8 +1906,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.requestTimeout = 60_000;
-server.headersTimeout = 65_000;
+server.requestTimeout = 180_000;
+server.headersTimeout = 185_000;
 
 server.listen(PORT, () => {
   console.log(`Notion PDF Studio running at http://localhost:${PORT}`);
