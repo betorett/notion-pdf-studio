@@ -20,7 +20,7 @@ const state = {
   selected: new Set(),
   bundles: [],
   filters: [],
-  sorts: [],
+  sorts: defaultSorts(),
   dbSettings: {
     hiddenProperties: []
   },
@@ -306,6 +306,17 @@ function markPreviewDirty() {
   if (els.previewCanvas) els.previewCanvas.dataset.previewKey = "";
 }
 
+function defaultSorts() {
+  return [{ property: "__created_time", direction: "descending" }];
+}
+
+function invalidateLoadedBundles() {
+  state.bundles = [];
+  markPreviewDirty();
+  renderPreview(true);
+  updateReadyExportCard();
+}
+
 function scheduleRenderPreview(force = false) {
   cancelAnimationFrame(renderPreviewFrame);
   renderPreviewFrame = requestAnimationFrame(() => renderPreview(force));
@@ -340,7 +351,7 @@ async function syncNotion() {
     state.source = payload.source;
     state.schema = payload.source.schema || {};
     state.pages = payload.pages || [];
-    state.selected = new Set(state.pages.map((page) => page.id));
+    state.selected = new Set();
     state.tablePage = 1;
     state.bundles = [];
     markPreviewDirty();
@@ -504,7 +515,7 @@ function renderSavedDatabases() {
     button.addEventListener("click", () => {
       els.sourceInput.value = saved.sourceId;
       state.filters = saved.filters || [];
-      state.sorts = saved.sorts || [];
+      state.sorts = saved.sorts?.length ? saved.sorts : defaultSorts();
       state.dbSettings = normalizeDbSettings(saved.dbSettings);
       state.settings = { ...state.settings, ...(saved.settings || {}) };
       applySettingsToControls();
@@ -793,17 +804,20 @@ function renderPagesTable() {
   state.tablePage = Math.min(Math.max(1, Number(state.tablePage || 1)), totalPages);
   const start = (state.tablePage - 1) * pageSize;
   const visible = allVisible.slice(start, start + pageSize);
+  const allFilteredSelected = Boolean(allVisible.length) && allVisible.every((page) => state.selected.has(page.id));
+  const someFilteredSelected = allVisible.some((page) => state.selected.has(page.id));
   const propNames = preferredPropertyColumns();
   els.tableHead.innerHTML = [
-    `<th style="width:34px"><input id="headCheckbox" type="checkbox" ${visible.length && visible.every((page) => state.selected.has(page.id)) ? "checked" : ""}></th>`,
+    `<th style="width:34px"><input id="headCheckbox" type="checkbox" title="Seleccionar o deseleccionar todas las páginas filtradas" ${allFilteredSelected ? "checked" : ""}></th>`,
     `<th style="width:34%">Nombre</th>`,
     ...propNames.map((name) => `<th>${escapeHtml(name)}</th>`),
     `<th style="width:128px">Editada</th>`
   ].join("");
 
   const checkbox = document.getElementById("headCheckbox");
+  if (checkbox) checkbox.indeterminate = !allFilteredSelected && someFilteredSelected;
   checkbox?.addEventListener("change", () => {
-    toggleCurrentPageSelection(checkbox.checked);
+    toggleFilteredSelection(checkbox.checked);
   });
 
   els.pageRows.innerHTML = "";
@@ -825,6 +839,7 @@ function renderPagesTable() {
     box.addEventListener("change", () => {
       if (box.checked) state.selected.add(box.dataset.pageId);
       else state.selected.delete(box.dataset.pageId);
+      invalidateLoadedBundles();
       renderSelectionMeta();
     });
   });
@@ -876,7 +891,6 @@ function renderSelectionMeta() {
   state.tablePage = Math.min(Math.max(1, Number(state.tablePage || 1)), totalPages);
   const start = visible.length ? (state.tablePage - 1) * pageSize + 1 : 0;
   const end = Math.min(visible.length, state.tablePage * pageSize);
-  const currentPageRows = visible.slice((state.tablePage - 1) * pageSize, (state.tablePage - 1) * pageSize + pageSize);
   els.selectionCount.textContent = `${state.selected.size} seleccionada${state.selected.size === 1 ? "" : "s"}`;
   els.pageCount.textContent = visible.length
     ? `${start}-${end} de ${visible.length} página${visible.length === 1 ? "" : "s"}`
@@ -889,20 +903,21 @@ function toggleSelectAll() {
   const allSelected = visible.length && visible.every((page) => state.selected.has(page.id));
   if (allSelected) visible.forEach((page) => state.selected.delete(page.id));
   else visible.forEach((page) => state.selected.add(page.id));
+  invalidateLoadedBundles();
   renderPagesTable();
 }
 
-function toggleCurrentPageSelection(checked) {
+function toggleFilteredSelection(checked) {
   const visible = filteredVisiblePages();
-  const pageSize = Math.max(1, Number(state.tablePageSize || 10));
-  const current = visible.slice((state.tablePage - 1) * pageSize, state.tablePage * pageSize);
-  if (checked) current.forEach((page) => state.selected.add(page.id));
-  else current.forEach((page) => state.selected.delete(page.id));
+  if (checked) visible.forEach((page) => state.selected.add(page.id));
+  else visible.forEach((page) => state.selected.delete(page.id));
+  invalidateLoadedBundles();
   renderPagesTable();
 }
 
 function clearSelection() {
   state.selected.clear();
+  invalidateLoadedBundles();
   renderPagesTable();
 }
 
@@ -911,6 +926,7 @@ function invertVisibleSelection() {
     if (state.selected.has(page.id)) state.selected.delete(page.id);
     else state.selected.add(page.id);
   }
+  invalidateLoadedBundles();
   renderPagesTable();
 }
 
