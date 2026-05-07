@@ -1721,9 +1721,7 @@ async function serveStatic(req, res, pathname) {
     res.writeHead(200, responseHeaders({
       "Content-Type": MIME_TYPES[path.extname(resolved)] || "application/octet-stream",
       "Content-Length": data.length,
-      "Cache-Control": target === "/index.html"
-        ? "no-cache"
-        : "public, max-age=3600, must-revalidate"
+      "Cache-Control": cacheControlForStaticTarget(target)
     }));
     if (req.method === "HEAD") {
       res.end();
@@ -1733,6 +1731,13 @@ async function serveStatic(req, res, pathname) {
   } catch {
     sendJson(res, 404, { error: "Not found" });
   }
+}
+
+function cacheControlForStaticTarget(target) {
+  if (target === "/index.html" || [".js", ".css"].includes(path.extname(target))) {
+    return "no-store, max-age=0";
+  }
+  return "public, max-age=3600, must-revalidate";
 }
 
 async function handleApi(req, res, pathname) {
