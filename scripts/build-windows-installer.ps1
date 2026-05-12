@@ -50,7 +50,7 @@ function New-AppShortcut {
   $shortcut = $shell.CreateShortcut($Path)
   $shortcut.TargetPath = Join-Path $InstallRoot "Start-NotionPdfStudio.vbs"
   $shortcut.WorkingDirectory = $InstallRoot
-  $shortcut.IconLocation = (Join-Path $InstallRoot "public\app.ico")
+  $shortcut.IconLocation = (Join-Path $InstallRoot "public\shortcut.ico") + ",0"
   $shortcut.Description = "Notion PDF Studio"
   $shortcut.Save()
 }
@@ -91,7 +91,7 @@ New-AppShortcut -Path $startMenuShortcut
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Notion PDF Studio"
 New-Item -Path $uninstallKey -Force | Out-Null
 Set-ItemProperty -Path $uninstallKey -Name DisplayName -Value "Notion PDF Studio"
-Set-ItemProperty -Path $uninstallKey -Name DisplayIcon -Value (Join-Path $InstallRoot "public\app.ico")
+Set-ItemProperty -Path $uninstallKey -Name DisplayIcon -Value ((Join-Path $InstallRoot "public\shortcut.ico") + ",0")
 Set-ItemProperty -Path $uninstallKey -Name Publisher -Value "Notion PDF Studio"
 Set-ItemProperty -Path $uninstallKey -Name InstallLocation -Value $InstallRoot
 Set-ItemProperty -Path $uninstallKey -Name UninstallString -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallRoot\Uninstall-NotionPdfStudio.ps1`""
