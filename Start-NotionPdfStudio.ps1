@@ -7,6 +7,8 @@ $ServerScript = Join-Path $AppRoot "server.js"
 $OutLogPath = Join-Path $AppRoot "notion-pdf-studio.out.log"
 $ErrLogPath = Join-Path $AppRoot "notion-pdf-studio.err.log"
 $BrowserProfile = Join-Path $env:LOCALAPPDATA "NotionPdfStudio\BrowserProfile"
+$BrowserIconStamp = Join-Path $env:LOCALAPPDATA "NotionPdfStudio\icon-version.txt"
+$IconVersion = "20260512-sharp-icon"
 $BundledNode = Join-Path $AppRoot "runtime\node.exe"
 $NodeExe = if (Test-Path $BundledNode) { $BundledNode } else { (Get-Command node -ErrorAction SilentlyContinue).Source }
 
@@ -88,6 +90,27 @@ function Test-BrowserOpen {
   return $null -ne ($processes | Select-Object -First 1)
 }
 
+function Clear-BrowserIconCacheIfNeeded {
+  $current = if (Test-Path $BrowserIconStamp) { Get-Content -LiteralPath $BrowserIconStamp -Raw -ErrorAction SilentlyContinue } else { "" }
+  if ($current -eq $IconVersion) {
+    return
+  }
+
+  $targets = @(
+    (Join-Path $BrowserProfile "Default\Favicons"),
+    (Join-Path $BrowserProfile "Default\Favicons-journal"),
+    (Join-Path $BrowserProfile "Default\Top Sites"),
+    (Join-Path $BrowserProfile "Default\Top Sites-journal"),
+    (Join-Path $BrowserProfile "Default\Web Data"),
+    (Join-Path $BrowserProfile "Default\Web Data-journal")
+  )
+  foreach ($target in $targets) {
+    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+  }
+  New-Item -ItemType Directory -Path (Split-Path -Parent $BrowserIconStamp) -Force | Out-Null
+  Set-Content -LiteralPath $BrowserIconStamp -Value $IconVersion -Encoding ASCII
+}
+
 Set-Location $AppRoot
 
 if (-not $NodeExe) {
@@ -132,6 +155,7 @@ if (-not $browser) {
 }
 
 New-Item -ItemType Directory -Path $BrowserProfile -Force | Out-Null
+Clear-BrowserIconCacheIfNeeded
 
 $browserProcess = Start-Process -FilePath $browser -ArgumentList @(
   "--app=$Url",
