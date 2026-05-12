@@ -142,15 +142,12 @@ body.sidebar-collapsed .chevron-icon.left {
 .brand-mark {
   width: 34px;
   height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #222;
+  display: block;
+  object-fit: contain;
+  border: 0;
   background: #fff;
-  color: #111;
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 700;
-  font-size: 19px;
-  box-shadow: 3px 3px 0 #111;
+  border-radius: 7px;
+  box-shadow: none;
 }
 
 .brand strong,
@@ -1194,9 +1191,8 @@ body.sidebar-collapsed .shell {
 .brand-mark {
   width: 38px;
   height: 38px;
-  border-radius: 3px;
-  font-size: 21px;
-  box-shadow: 2px 2px 0 #111;
+  border-radius: 7px;
+  box-shadow: none;
 }
 
 .brand strong {
