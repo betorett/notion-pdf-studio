@@ -8,7 +8,7 @@ $OutLogPath = Join-Path $AppRoot "notion-pdf-studio.out.log"
 $ErrLogPath = Join-Path $AppRoot "notion-pdf-studio.err.log"
 $BrowserProfile = Join-Path $env:LOCALAPPDATA "NotionPdfStudio\BrowserProfile"
 $BrowserIconStamp = Join-Path $env:LOCALAPPDATA "NotionPdfStudio\icon-version.txt"
-$IconVersion = "20260512-sharp-icon"
+$IconVersion = "20260512-taskbar-sharp"
 $BundledNode = Join-Path $AppRoot "runtime\node.exe"
 $NodeExe = if (Test-Path $BundledNode) { $BundledNode } else { (Get-Command node -ErrorAction SilentlyContinue).Source }
 
